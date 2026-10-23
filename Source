@@ -6948,6 +6948,9 @@ end
                 end
                 bf = false
                 ah(be, { Scale = 1 }, 0.4, Enum.EasingStyle.Quint)
+                if bg then
+                    return
+                end
                                 do 
                     local rp = ai("Frame", {
                         AnchorPoint = Vector2.new(0.5, 0.5),
@@ -6965,6 +6968,7 @@ end
                         pcall(rp.Destroy, rp)
                     end)
                 end
+                if not self.Open then
                     self:Toggle(true)
                 elseif self.Minimized then
                     self:Restore()
