@@ -1844,394 +1844,666 @@ local a = (function()
         return m(self, aU, api, aX, "Button")
     end
 
-    function aS:Toggle(aU)
-        local aV, aW
-        aU, aV, aW = aQ(
+        function aS:Toggle(opts)
+        local trackW, trackH = E and 44 or 36, E and 24 or 20
+        local knobS = E and 18 or 14
+        local pad = (trackH - knobS) / 2
+        local grow = E and 5 or 4
+        local card, stroke, _rowH, titleLbl, descLbl
+        opts, card, stroke, _rowH, titleLbl, descLbl = aQ(
             self,
-            aU,
+            opts,
             { Title = "Name", Description = "Desc", CurrentValue = "Default", Value = "Default" },
             "TextButton",
-            56,
+            trackW + 22,
             "Toggle"
         )
-        local aX = ai(
-            "Frame",
-            {
-                AnchorPoint = Vector2.new(1, 0.5),
-                Position = UDim2.new(1, -14, 0.5, 0),
-                Size = E and UDim2.fromOffset(44, 24) or UDim2.fromOffset(36, 20),
-                BackgroundColor3 = z.Surface3,
-                BorderSizePixel = 0,
-                Parent = aV,
-            }
-        )
-        aj(aX, UDim.new(1, 0))
-        ak(aX, z.Stroke)
-        local aY = ai(
-            "Frame",
-            {
-                AnchorPoint = Vector2.new(0, 0.5),
-                Position = UDim2.new(0, 3, 0.5, 0),
-                Size = E and UDim2.fromOffset(18, 18) or UDim2.fromOffset(14, 14),
-                BackgroundColor3 = z.Muted,
-                BorderSizePixel = 0,
-                Parent = aX,
-            }
-        )
-        aj(aY, UDim.new(1, 0))
-        local aZ = ai(
-            "ImageLabel",
-            {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.new(1, 24, 1, 24),
-                BackgroundTransparency = 1,
-                Image = A.Glow,
-                ImageColor3 = z.Accent,
-                ImageTransparency = 1,
-                ZIndex = 0,
-                Parent = aX,
-            }
-        )
-        local a_ = { Value = aU.Default == true }
-        local function a0(a1)
-            local a2 = a_.Value
-            local a3 = a1 and 0.25 or 0
-            ah(aX, { BackgroundColor3 = a2 and z.Accent or z.Surface3 }, a3)
-            ah(aZ, { ImageTransparency = a2 and 0.75 or 1 }, a3)
-            local a4 = E and 18 or 14
-            ah(
-                aY,
-                {
-                    Position = a2 and UDim2.new(0, (E and 44 or 36) - 3 - a4, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
-                    BackgroundColor3 = a2 and z.AccentDark or z.Muted,
-                },
-                a3,
-                Enum.EasingStyle.Back
-            )
-            if a1 then
-                ah(aY, { Size = UDim2.fromOffset(a4 + 4, a4 - 2) }, 0.08)
-                task.delay(0.08, function()
-                    ah(aY, { Size = UDim2.fromOffset(a4, a4) }, 0.2, Enum.EasingStyle.Back)
-                end)
+        local track = ai("Frame", {
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -14, 0.5, 0),
+            Size = UDim2.fromOffset(trackW, trackH),
+            BackgroundColor3 = z.Surface3,
+            BorderSizePixel = 0,
+            Parent = card,
+        })
+        aj(track, UDim.new(1, 0))
+        local trackStroke = ak(track, z.Stroke)
+        local knob = ai("Frame", {
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(0, pad, 0.5, 0),
+            Size = UDim2.fromOffset(knobS, knobS),
+            BackgroundColor3 = z.Muted,
+            BorderSizePixel = 0,
+            Parent = track,
+        })
+        aj(knob, UDim.new(1, 0))
+        local glow = ai("ImageLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.new(1, 24, 1, 24),
+            BackgroundTransparency = 1,
+            Image = A.Glow,
+            ImageColor3 = z.Accent,
+            ImageTransparency = 1,
+            ZIndex = 0,
+            Parent = track,
+        })
+
+        local state = { on = opts.Default == true, hover = false, press = false, disabled = opts.Disabled == true }
+        local api = { Value = state.on }
+        local pulseId = 0
+
+        local function paint(dur, pulse)
+            local on, locked = state.on, state.disabled
+            local w = knobS + (((state.press and not locked) or pulse) and grow or 0)
+            local x = on and (trackW - pad - w) or pad
+            ah(track, {
+                BackgroundColor3 = on and z.Accent or z.Surface3,
+                BackgroundTransparency = locked and 0.5 or 0,
+            }, dur)
+            ah(trackStroke, {
+                Color = on and z.Accent or ((state.hover and not locked) and z.StrokeHover or z.Stroke),
+                Transparency = locked and 0.5 or 0,
+            }, dur)
+            ah(glow, { ImageTransparency = (on and not locked) and 0.75 or 1 }, dur)
+            ah(knob, {
+                Position = UDim2.new(0, x, 0.5, 0),
+                Size = UDim2.fromOffset(w, knobS),
+                BackgroundColor3 = on and z.AccentDark or z.Muted,
+                BackgroundTransparency = locked and 0.35 or 0,
+            }, dur, Enum.EasingStyle.Quint)
+            ah(titleLbl, { TextTransparency = locked and 0.55 or 0 }, dur)
+            if descLbl then
+                ah(descLbl, { TextTransparency = locked and 0.7 or 0 }, dur)
             end
         end
-        local a1 = false
-        function a_:Set(a2, a3)
-            a2 = a2 == true
-            if a2 == a_.Value then
+
+        local function setValue(value, silent, byUser)
+            value = value == true
+            if value == state.on then
                 return
             end
-            a_.Value = a2
-            a0(true)
-            if not a1 then
-                aF(aW)
+            state.on = value
+            api.Value = value
+            pulseId = pulseId + 1
+            local id = pulseId
+            if state.press then
+                paint(0.2)
+            else
+                paint(0.1, true)
+                task.delay(0.1, function()
+                    if id == pulseId then
+                        paint(0.25)
+                    end
+                end)
             end
-            if not a3 then
-                aJ(aU.Callback, a2)
+            if not byUser then
+                aF(stroke)
+            end
+            if not silent then
+                aJ(opts.Callback, value)
             end
         end
-        function a_:Get()
-            return a_.Value
-        end
-        a0(false)
-        aV.MouseButton1Click:Connect(function()
-            a1 = true
-            a_:Set(not a_.Value)
-            a1 = false
+
+        card.MouseEnter:Connect(function()
+            if ax() then
+                return
+            end
+            state.hover = true
+            paint(0.12)
         end)
-        local a2 = m(self, aU, a_, aV, "Toggle")
-        if a_.Value then
-            aJ(aU.Callback, true)
+        card.MouseLeave:Connect(function()
+            state.hover, state.press = false, false
+            paint(0.2)
+        end)
+        card.InputBegan:Connect(function(input)
+            if aw(input) and not state.disabled then
+                state.press = true
+                paint(0.08)
+            end
+        end)
+        card.InputEnded:Connect(function(input)
+            if aw(input) and state.press then
+                state.press = false
+                paint(0.15)
+            end
+        end)
+        
+        local canTap = ay(card, function()
+            return card:FindFirstAncestorWhichIsA("ScrollingFrame")
+        end)
+        card.MouseButton1Click:Connect(function()
+            if state.disabled or not canTap() then
+                return
+            end
+            setValue(not state.on, false, true)
+        end)
+
+        function api:Set(value, silent)
+            setValue(value, silent, false)
         end
-        return a2
+        function api:Get()
+            return state.on
+        end
+        function api:SetDisabled(v)
+            state.disabled = v == true
+            if state.disabled then
+                state.hover, state.press = false, false
+            end
+            paint(0.15)
+        end
+        function api:IsDisabled()
+            return state.disabled
+        end
+        function api:SetText(text)
+            text = tostring(text)
+            titleLbl.Text = text
+            api._searchName = text
+            api._searchKey = string.lower(text)
+        end
+        function api:SetDesc(text)
+            if descLbl then
+                descLbl.Text = tostring(text)
+            end
+        end
+
+        paint(0)
+        local control = m(self, opts, api, card, "Toggle")
+        if state.on then
+            aJ(opts.Callback, true)
+        end
+        return control
     end
-    function aS:Slider(aU)
-        aU = l(
-            aU,
-            { Title = "Name", Description = "Desc", CurrentValue = "Default", Value = "Default", Increment = "Step" }
-        )
-        local aV = aU.Min or 0
-        local aW = aU.Max or 100
-        local aX = aU.Step or 1
-        local aY = aU.Suffix or ""
-        local aZ = aL(aV, aW, aX)
-        local a_ = aM(self)
-        local a0 = a_.Compact
-        local a1 = a_.Slider
-        local a2, a3 = aO(self, "Frame", a1, aU)
-        aG(a2, a3)
-        am({
-            Position = UDim2.fromOffset(14, a0 and 5 or 12),
-            Size = UDim2.new(1, -120, 0, 18),
-            Text = aU.Name or "Slider",
-            TextSize = a_.TextSize,
-            Parent = a2,
+
+    function aS:Slider(opts)
+        opts = l(opts, {
+            Title = "Name",
+            Description = "Desc",
+            CurrentValue = "Default",
+            Value = "Default",
+            Increment = "Step",
         })
-        local a4 = ai(
-            "Frame",
-            {
-                AnchorPoint = Vector2.new(1, 0),
-                Position = UDim2.new(1, a0 and -14 or -10, 0, a0 and 2 or 9),
-                Size = UDim2.fromOffset(40, 24),
-                BackgroundColor3 = z.Surface,
-                BorderSizePixel = 0,
-                ClipsDescendants = true,
-                Parent = a2,
-            }
-        )
-        aj(a4, UDim.new(0, 6))
-        local a5 = ak(a4)
-        local a6 = am({
+        local minV = tonumber(opts.Min) or 0
+        local maxV = tonumber(opts.Max) or 100
+        if minV > maxV then
+            minV, maxV = maxV, minV
+        end
+        local step = tonumber(opts.Step) or 1
+        if not (step > 0) then
+            step = 1
+        end
+        local suffix = opts.Suffix ~= nil and tostring(opts.Suffix) or ""
+
+        local decimals = 0
+        local function decimalsOf(n)
+            local s = string.format("%.8f", math.abs(n)):gsub("0+$", "")
+            local dot = s:find(".", 1, true)
+            return dot and (#s - dot) or 0
+        end
+        local function calcDecimals()
+            decimals = math.min(math.max(decimalsOf(step), decimalsOf(minV)), 8)
+        end
+        calcDecimals()
+        local function round(v)
+            local mult = 10 ^ decimals
+            v = math.floor(v * mult + 0.5) / mult
+            return v == 0 and 0 or v
+        end
+        local function snap(v)
+            v = math.clamp(v, minV, maxV)
+            local snapped = minV + math.floor((v - minV) / step + 0.5) * step
+            if snapped > maxV or math.abs(maxV - v) < math.abs(snapped - v) then
+                snapped = maxV
+            end
+            return math.clamp(round(snapped), minV, maxV)
+        end
+        local function fmt(v)
+            return string.format("%." .. decimals .. "f", v)
+        end
+        local function fractionOf(v)
+            local range = maxV - minV
+            return range == 0 and 0 or math.clamp((v - minV) / range, 0, 1)
+        end
+        
+        local function parseInput(text)
+            text = tostring(text):gsub(",", "."):gsub("%s", "")
+            return tonumber(text:match("^[%+%-]?%d*%.?%d*"))
+        end
+
+        local metrics = aM(self)
+        local compact = metrics.Compact
+        local rowH = metrics.Slider
+        local card, cardStroke = aO(self, "Frame", rowH, opts)
+        aG(card, cardStroke)
+        local titleLbl = am({
+            Position = UDim2.fromOffset(14, compact and 5 or 12),
+            Size = UDim2.new(1, -120, 0, 18),
+            Text = opts.Name or "Slider",
+            TextSize = metrics.TextSize,
+            Parent = card,
+        })
+        local chip = ai("Frame", {
+            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, compact and -14 or -10, 0, compact and 2 or 9),
+            Size = UDim2.fromOffset(40, 24),
+            BackgroundColor3 = z.Surface,
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+            Parent = card,
+        })
+        aj(chip, UDim.new(0, 6))
+        local chipStroke = ak(chip)
+        local valueLbl = am({
             Size = UDim2.new(1, 0, 1, 0),
             TextSize = 13,
             TextColor3 = z.Accent,
             TextXAlignment = Enum.TextXAlignment.Center,
             TextTruncate = Enum.TextTruncate.None,
-            Parent = a4,
+            Parent = chip,
         })
-        local a7 = ai(
-            "TextBox",
-            {
-                Position = UDim2.fromOffset(9, 0),
-                Size = UDim2.new(0, 0, 1, 0),
-                AutomaticSize = Enum.AutomaticSize.X,
-                BackgroundTransparency = 1,
-                Text = "",
-                TextColor3 = z.Text,
-                TextSize = 13,
-                FontFace = D.Medium,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                ClearTextOnFocus = false,
-                Visible = false,
-                Parent = a4,
-            }
-        )
-        ai("UISizeConstraint", { MinSize = Vector2.new(14, 0), Parent = a7 })
-        local a8 = am({
+        local editBox = ai("TextBox", {
+            Position = UDim2.fromOffset(9, 0),
             Size = UDim2.new(0, 0, 1, 0),
             AutomaticSize = Enum.AutomaticSize.X,
-            Text = aY,
+            BackgroundTransparency = 1,
+            Text = "",
+            TextColor3 = z.Text,
+            TextSize = 13,
+            FontFace = D.Medium,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ClearTextOnFocus = false,
+            Visible = false,
+            Parent = chip,
+        })
+        ai("UISizeConstraint", { MinSize = Vector2.new(14, 0), Parent = editBox })
+        local suffixLbl = am({
+            Size = UDim2.new(0, 0, 1, 0),
+            AutomaticSize = Enum.AutomaticSize.X,
+            Text = suffix,
             TextSize = 13,
             TextColor3 = z.Accent,
             TextTruncate = Enum.TextTruncate.None,
             Visible = false,
-            Parent = a4,
+            Parent = chip,
         })
-        local a9 = ai(
-            "TextButton",
-            { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 2, Parent = a4 }
-        )
-        local ba = false
-        local function bb(bc)
-            local bd
-            if ba then
-                bd = 9 + a7.AbsoluteSize.X / self.Window.Scale.Scale + a8.TextBounds.X + 9
-                a8.Position = UDim2.fromOffset(9 + a7.AbsoluteSize.X / self.Window.Scale.Scale, 0)
+        local chipBtn = ai("TextButton", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundTransparency = 1,
+            Text = "",
+            AutoButtonColor = false,
+            ZIndex = 2,
+            Parent = chip,
+        })
+
+        local barY = rowH - (compact and 13 or 18)
+        local bar = ai("Frame", {
+            Position = UDim2.new(0, 14, 0, barY),
+            Size = UDim2.new(1, -28, 0, 5),
+            BackgroundColor3 = z.Surface3,
+            BorderSizePixel = 0,
+            Parent = card,
+        })
+        aj(bar, UDim.new(1, 0))
+        local fill = ai("Frame", {
+            Size = UDim2.new(0, 0, 1, 0),
+            BackgroundColor3 = z.Accent,
+            BorderSizePixel = 0,
+            Parent = bar,
+        })
+        aj(fill, UDim.new(1, 0))
+        local glow = ai("ImageLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0, 0, 0.5, 0),
+            Size = UDim2.fromOffset(28, 28),
+            BackgroundTransparency = 1,
+            Image = A.Glow,
+            ImageColor3 = z.Accent,
+            ImageTransparency = 0.85,
+            ZIndex = 2,
+            Parent = bar,
+        })
+        local thumb = ai("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0, 0, 0.5, 0),
+            Size = UDim2.fromOffset(12, 12),
+            BackgroundColor3 = z.Accent,
+            BorderSizePixel = 0,
+            ZIndex = 3,
+            Parent = bar,
+        })
+        aj(thumb, UDim.new(1, 0))
+        
+        local hitTop = math.max((compact and 2 or 9) + 24, math.floor(barY + 2.5 - (E and 20 or 14)))
+        local hit = ai("TextButton", {
+            Position = UDim2.fromOffset(0, hitTop),
+            Size = UDim2.new(1, 0, 0, rowH - hitTop),
+            BackgroundTransparency = 1,
+            Text = "",
+            AutoButtonColor = false,
+            ZIndex = 4,
+            Parent = card,
+        })
+
+        local state = { dragging = false, hover = false, chipHover = false, editing = false, disabled = opts.Disabled == true }
+        local api = { Value = 0, Dragging = false }
+        api.Value = snap(tonumber(opts.Default) or minV)
+        local pulseId = 0
+        local dragInput, lockedScroller
+
+        local function paintChip(dur)
+            local color, alpha = z.Stroke, 0
+            if state.editing then
+                color = z.StrokeHover
+            elseif state.dragging then
+                color, alpha = z.Accent, 0.55
+            elseif state.chipHover and not state.disabled then
+                color = z.StrokeHover
+            end
+            ah(chipStroke, { Color = color, Transparency = alpha }, dur)
+        end
+        local function paintThumb(dur)
+            local size, glowSize, glowAlpha = 12, 28, 0.85
+            if state.disabled then
+                glowAlpha = 1
+            elseif state.dragging then
+                size, glowSize, glowAlpha = 16, 44, 0.7
+            elseif state.hover then
+                glowSize, glowAlpha = 34, 0.78
+            end
+            ah(
+                thumb,
+                { Size = UDim2.fromOffset(size, size) },
+                dur,
+                state.dragging and Enum.EasingStyle.Back or Enum.EasingStyle.Quint
+            )
+            ah(glow, { Size = UDim2.fromOffset(glowSize, glowSize), ImageTransparency = glowAlpha }, dur, Enum.EasingStyle.Quint)
+        end
+        local function paintDisabled(dur)
+            local locked = state.disabled
+            ah(titleLbl, { TextTransparency = locked and 0.55 or 0 }, dur)
+            ah(valueLbl, { TextTransparency = locked and 0.55 or 0 }, dur)
+            ah(bar, { BackgroundTransparency = locked and 0.5 or 0 }, dur)
+            ah(fill, { BackgroundTransparency = locked and 0.6 or 0 }, dur)
+            ah(thumb, { BackgroundTransparency = locked and 0.4 or 0 }, dur)
+        end
+        local function paintAll(dur)
+            paintDisabled(dur)
+            paintThumb(dur)
+            paintChip(dur)
+        end
+
+        local function resizeChip(instant)
+            local width
+            if state.editing then
+                local boxW = editBox.AbsoluteSize.X / self.Window.Scale.Scale
+                width = 9 + boxW + suffixLbl.TextBounds.X + 9
+                suffixLbl.Position = UDim2.fromOffset(9 + boxW, 0)
             else
-                bd = a6.TextBounds.X + 18
+                width = valueLbl.TextBounds.X + 18
             end
-            bd = math.max(bd, 36)
-            if bc then
-                a4.Size = UDim2.fromOffset(bd, 24)
+            width = math.max(width, 36)
+            if instant then
+                chip.Size = UDim2.fromOffset(width, 24)
             else
-                ah(a4, { Size = UDim2.fromOffset(bd, 24) }, 0.2)
+                ah(chip, { Size = UDim2.fromOffset(width, 24) }, 0.2)
             end
         end
-        a6:GetPropertyChangedSignal("TextBounds"):Connect(function()
-            if not ba then
-                bb(false)
+        valueLbl:GetPropertyChangedSignal("TextBounds"):Connect(function()
+            if not state.editing then
+                resizeChip(false)
             end
         end)
-        a7:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-            if ba then
-                bb(false)
+        editBox:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+            if state.editing then
+                resizeChip(false)
             end
         end)
-        local bc = ai(
-            "Frame",
-            {
-                Position = UDim2.new(0, 14, 0, a1 - (a0 and 13 or 18)),
-                Size = UDim2.new(1, -28, 0, 5),
-                BackgroundColor3 = z.Surface3,
-                BorderSizePixel = 0,
-                Parent = a2,
-            }
-        )
-        aj(bc, UDim.new(1, 0))
-        local bd =
-            ai("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = z.Accent, BorderSizePixel = 0, Parent = bc })
-        aj(bd, UDim.new(1, 0))
-        local be = ai(
-            "ImageLabel",
-            {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.new(0, 0, 0.5, 0),
-                Size = UDim2.fromOffset(28, 28),
-                BackgroundTransparency = 1,
-                Image = A.Glow,
-                ImageColor3 = z.Accent,
-                ImageTransparency = 0.85,
-                ZIndex = 2,
-                Parent = bc,
-            }
-        )
-        local bf = ai(
-            "Frame",
-            {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.new(0, 0, 0.5, 0),
-                Size = UDim2.fromOffset(12, 12),
-                BackgroundColor3 = z.Accent,
-                BorderSizePixel = 0,
-                ZIndex = 3,
-                Parent = bc,
-            }
-        )
-        aj(bf, UDim.new(1, 0))
-        local bg = ai(
-            "TextButton",
-            {
-                Position = UDim2.new(0, 8, 0, a1 - (a0 and 13 or 18) - (E and 19 or 13)),
-                Size = UDim2.new(1, -16, 0, E and 40 or 28),
-                BackgroundTransparency = 1,
-                Text = "",
-                AutoButtonColor = false,
-                ZIndex = 4,
-                Parent = a2,
-            }
-        )
-        local bh = { Value = math.clamp(aU.Default or aV, aV, aW) }
-        local bi = false
-        a9.MouseEnter:Connect(function()
-            ah(a5, { Color = z.StrokeHover }, 0.12)
-        end)
-        a9.MouseLeave:Connect(function()
-            if not a7:IsFocused() then
-                ah(a5, { Color = z.Stroke }, 0.2)
-            end
-        end)
-        a9.MouseButton1Click:Connect(function()
-            ba = true
-            a7.Text = aZ.format(bh.Value)
-            a6.Visible = false
-            a7.Visible = true
-            a8.Visible = aY ~= ""
-            a9.Visible = false
-            ah(a5, { Color = z.StrokeHover }, 0.12)
-            a7:CaptureFocus()
-            task.defer(bb, false)
-        end)
-        a7.FocusLost:Connect(function()
-            local bj = tonumber(a7.Text)
-            ba = false
-            a7.Visible = false
-            a8.Visible = false
-            a6.Visible = true
-            a9.Visible = true
-            ah(a5, { Color = z.Stroke }, 0.2)
-            if bj then
-                bh:Set(bj)
-            end
-            bb(false)
-        end)
-        bg.MouseEnter:Connect(function()
-            if not bi then
-                ah(be, { ImageTransparency = 0.78, Size = UDim2.fromOffset(34, 34) }, 0.15)
-            end
-        end)
-        bg.MouseLeave:Connect(function()
-            if not bi then
-                ah(be, { ImageTransparency = 0.85, Size = UDim2.fromOffset(28, 28) }, 0.2)
-            end
-        end)
-        local bj = aZ.snap
-        local function bk()
-            return (aW - aV) == 0 and 0 or (bh.Value - aV) / (aW - aV)
+
+        local function place(frac, dur, style)
+            local pos = UDim2.new(frac, 0, 0.5, 0)
+            ah(fill, { Size = UDim2.new(frac, 0, 1, 0) }, dur, style)
+            ah(thumb, { Position = pos }, dur, style)
+            ah(glow, { Position = pos }, dur, style)
         end
-        local function bl(bm, bn, bo)
-            bo = bo or Enum.EasingStyle.Linear
-            ah(bd, { Size = UDim2.new(bm, 0, 1, 0) }, bn, bo)
-            ah(bf, { Position = UDim2.new(bm, 0, 0.5, 0) }, bn, bo)
-            ah(be, { Position = UDim2.new(bm, 0, 0.5, 0) }, bn, bo)
+        local function applyVisual(dur, style)
+            place(fractionOf(api.Value), dur, style)
+            valueLbl.Text = fmt(api.Value) .. suffix
         end
-        local function bm(bn, bo)
-            bl(bk(), bn, bo)
-            a6.Text = aZ.format(bh.Value) .. aY
-        end
-        local function bn(bo)
-            local bp = bk()
-            local bq = math.max(bc.AbsoluteSize.X, 1)
-            local br = (bp >= bo and 1 or -1) * (5 / bq)
-            bl(math.clamp(bp + br, 0, 1), 0.22, Enum.EasingStyle.Quint)
-            task.delay(0.22, function()
-                if not bi then
-                    bl(bk(), 0.18, Enum.EasingStyle.Quint)
+        local function pulse()
+            pulseId = pulseId + 1
+            local id = pulseId
+            ah(thumb, { Size = UDim2.fromOffset(14, 12) }, 0.08)
+            ah(glow, { Size = UDim2.fromOffset(32, 32), ImageTransparency = 0.78 }, 0.12)
+            task.delay(0.1, function()
+                if id == pulseId and not state.dragging then
+                    paintThumb(0.25)
                 end
             end)
-            a6.Text = aZ.format(bh.Value) .. aY
         end
-        local function bo()
-            ah(bf, { Size = UDim2.fromOffset(14, 12) }, 0.08)
-            ah(be, { Size = UDim2.fromOffset(32, 32), ImageTransparency = 0.78 }, 0.12)
-            task.delay(0.1, function()
-                ah(bf, { Size = UDim2.fromOffset(12, 12) }, 0.25, Enum.EasingStyle.Quint)
-                ah(be, { Size = UDim2.fromOffset(28, 28), ImageTransparency = 0.85 }, 0.25)
-            end)
-        end
-        function bh:Set(bp, bq)
-            bp = bj(tonumber(bp) or aV)
-            if bp == bh.Value then
+
+        function api:Set(value, silent)
+            value = tonumber(value)
+            if not value or value ~= value then
                 return
             end
-            local br = bk()
-            bh.Value = bp
-            if bi then
-                bm(0.05)
+            value = snap(value)
+            if value == api.Value then
+                return
+            end
+            api.Value = value
+            if state.dragging then
+                applyVisual(0.07, Enum.EasingStyle.Quad)
             else
-                bn(br)
-                bo()
-                aF(a3)
+                applyVisual(0.3, Enum.EasingStyle.Quint)
+                pulse()
+                aF(cardStroke)
             end
-            if not bq then
-                aJ(aU.Callback, bp)
+            if not silent then
+                aJ(opts.Callback, value)
             end
         end
-        function bh:Get()
-            return bh.Value
+        function api:Get()
+            return api.Value
         end
-        local function bp(bq)
-            local br = math.clamp((bq - bc.AbsolutePosition.X) / bc.AbsoluteSize.X, 0, 1)
-            bh:Set(aV + (aW - aV) * br)
+
+        local function valueFromX(x)
+            local frac = math.clamp((x - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1), 0, 1)
+            api:Set(minV + (maxV - minV) * frac)
         end
-        bg.InputBegan:Connect(function(bq)
-            if aw(bq) then
-                bi = true
-                bh.Dragging = true
-                ah(bf, { Size = UDim2.fromOffset(16, 16) }, 0.15, Enum.EasingStyle.Back)
-                ah(be, { Size = UDim2.fromOffset(44, 44), ImageTransparency = 0.7 }, 0.15)
-                bp(av().X)
+        local function unlockScroll()
+            if lockedScroller then
+                lockedScroller.ScrollingEnabled = true
+                lockedScroller = nil
+            end
+        end
+        local function beginDrag(input)
+            if state.dragging or state.disabled then
+                return
+            end
+            state.dragging = true
+            api.Dragging = true
+            dragInput = input
+            if input.UserInputType == Enum.UserInputType.Touch then
+                
+                local scroller = card:FindFirstAncestorWhichIsA("ScrollingFrame")
+                if scroller and scroller.ScrollingEnabled then
+                    scroller.ScrollingEnabled = false
+                    lockedScroller = scroller
+                end
+            end
+            paintThumb(0.15)
+            paintChip(0.12)
+            valueFromX(input.Position.X)
+        end
+        local function endDrag()
+            if not state.dragging then
+                return
+            end
+            state.dragging = false
+            api.Dragging = false
+            dragInput = nil
+            unlockScroll()
+            paintThumb(0.2)
+            paintChip(0.2)
+            applyVisual(0.15, Enum.EasingStyle.Quint)
+            aJ(opts.OnRelease, api.Value)
+        end
+
+        hit.InputBegan:Connect(function(input)
+            if aw(input) then
+                beginDrag(input)
             end
         end)
-        self.Window:_listen("Changed", function(bq)
-            if bi and aA(bq) then
-                bp(av().X)
+        hit.MouseEnter:Connect(function()
+            if ax() then
+                return
             end
-        end, bh)
-        self.Window:_listen("Ended", function(bq)
-            if bi and aw(bq) then
-                bi = false
-                bh.Dragging = false
-                ah(bf, { Size = UDim2.fromOffset(12, 12) }, 0.2)
-                ah(be, { Size = UDim2.fromOffset(28, 28), ImageTransparency = 0.85 }, 0.2)
-                aJ(aU.OnRelease, bh.Value)
+            state.hover = true
+            paintThumb(0.15)
+        end)
+        hit.MouseLeave:Connect(function()
+            state.hover = false
+            paintThumb(0.2)
+        end)
+        self.Window:_listen("Changed", function(input)
+            if not (state.dragging and dragInput) then
+                return
             end
-        end, bh)
-        bh.Value = bj(bh.Value)
-        bm(0)
-        task.defer(bb, true)
-        return m(self, aU, bh, a2, "Slider")
+            if dragInput.UserInputType == Enum.UserInputType.Touch then
+                if input == dragInput then
+                    valueFromX(input.Position.X)
+                end
+            elseif input.UserInputType == Enum.UserInputType.MouseMovement then
+                
+                local ok, pressed = pcall(b.IsMouseButtonPressed, b, Enum.UserInputType.MouseButton1)
+                if ok and not pressed then
+                    endDrag()
+                else
+                    valueFromX(input.Position.X)
+                end
+            end
+        end, api)
+        self.Window:_listen("Ended", function(input)
+            if not (state.dragging and dragInput) then
+                return
+            end
+            if input == dragInput
+                or (dragInput.UserInputType ~= Enum.UserInputType.Touch and input.UserInputType == Enum.UserInputType.MouseButton1)
+            then
+                endDrag()
+            end
+        end, api)
+        
+        api._listeners = api._listeners or {}
+        table.insert(api._listeners, unlockScroll)
+
+        chipBtn.MouseEnter:Connect(function()
+            if ax() then
+                return
+            end
+            state.chipHover = true
+            paintChip(0.12)
+        end)
+        chipBtn.MouseLeave:Connect(function()
+            state.chipHover = false
+            paintChip(0.2)
+        end)
+        chipBtn.MouseButton1Click:Connect(function()
+            if state.disabled then
+                return
+            end
+            state.editing = true
+            state.chipHover = false
+            editBox.Text = fmt(api.Value)
+            valueLbl.Visible = false
+            editBox.Visible = true
+            suffixLbl.Visible = suffix ~= ""
+            chipBtn.Visible = false
+            paintChip(0.12)
+            editBox:CaptureFocus()
+            task.defer(resizeChip, false)
+        end)
+        editBox.Focused:Connect(function()
+            
+            task.defer(function()
+                if editBox:IsFocused() then
+                    editBox.SelectionStart = 1
+                    editBox.CursorPosition = #editBox.Text + 1
+                end
+            end)
+        end)
+        editBox.FocusLost:Connect(function(_enter, inputObject)
+            local cancelled = inputObject ~= nil and inputObject.KeyCode == Enum.KeyCode.Escape
+            local parsed = (not cancelled) and parseInput(editBox.Text) or nil
+            state.editing = false
+            state.chipHover = false
+            editBox.Visible = false
+            suffixLbl.Visible = false
+            valueLbl.Visible = true
+            chipBtn.Visible = true
+            paintChip(0.2)
+            if parsed then
+                api:Set(parsed)
+            end
+            resizeChip(false)
+        end)
+
+        function api:SetDisabled(v)
+            state.disabled = v == true
+            if state.disabled then
+                if state.dragging then
+                    endDrag()
+                end
+                if state.editing then
+                    editBox:ReleaseFocus()
+                end
+                state.hover, state.chipHover = false, false
+            end
+            paintAll(0.15)
+        end
+        function api:IsDisabled()
+            return state.disabled
+        end
+        function api:SetText(text)
+            text = tostring(text)
+            titleLbl.Text = text
+            api._searchName = text
+            api._searchKey = string.lower(text)
+        end
+        function api:SetSuffix(text)
+            suffix = text ~= nil and tostring(text) or ""
+            suffixLbl.Text = suffix
+            applyVisual(0, nil)
+            resizeChip(false)
+        end
+        
+        function api:SetRange(newMin, newMax, newStep, silent)
+            newMin = tonumber(newMin) or minV
+            newMax = tonumber(newMax) or maxV
+            if newMin > newMax then
+                newMin, newMax = newMax, newMin
+            end
+            minV, maxV = newMin, newMax
+            newStep = tonumber(newStep)
+            if newStep and newStep > 0 then
+                step = newStep
+            end
+            calcDecimals()
+            local clamped = snap(api.Value)
+            local changed = clamped ~= api.Value
+            api.Value = clamped
+            applyVisual(0.25, Enum.EasingStyle.Quint)
+            if changed and not silent then
+                aJ(opts.Callback, clamped)
+            end
+        end
+
+        applyVisual(0, nil)
+        paintAll(0)
+        task.defer(resizeChip, true)
+        return m(self, opts, api, card, "Slider")
     end
+
     function aS:Dropdown(opt)
         opt = l(opt, {
             Title = "Name",
