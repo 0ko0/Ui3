@@ -124,16 +124,16 @@ local a = (function()
         return p
     end
     k.Theme = {
-        Background = Color3.fromRGB(15, 18, 26),
-        Surface = Color3.fromRGB(18, 22, 31),
-        Surface2 = Color3.fromRGB(22, 26, 37),
-        Surface3 = Color3.fromRGB(37, 44, 60),
-        Stroke = Color3.fromRGB(34, 40, 55),
-        StrokeHover = Color3.fromRGB(70, 84, 112),
-        Accent = Color3.fromRGB(128, 160, 246),
-        AccentDark = Color3.fromRGB(14, 18, 30),
-        Text = Color3.fromRGB(228, 232, 242),
-        Muted = Color3.fromRGB(116, 126, 148),
+                Background = Color3.fromRGB(10, 10, 10),
+        Surface = Color3.fromRGB(15, 15, 15),
+        Surface2 = Color3.fromRGB(21, 21, 21),
+        Surface3 = Color3.fromRGB(36, 36, 36),
+        Stroke = Color3.fromRGB(38, 38, 38),
+        StrokeHover = Color3.fromRGB(110, 110, 110),
+        Accent = Color3.fromRGB(255, 255, 255),
+        AccentDark = Color3.fromRGB(10, 10, 10),
+        Text = Color3.fromRGB(245, 245, 245),
+        Muted = Color3.fromRGB(140, 140, 140),
         Warning = Color3.fromRGB(240, 176, 108),
         Success = Color3.fromRGB(150, 220, 170),
         Error = Color3.fromRGB(240, 120, 120),
@@ -171,6 +171,18 @@ local a = (function()
         }
     end
     k.ThemePresets = {
+    	        Noir = p(
+            { 10, 10, 10 },
+            { 15, 15, 15 },
+            { 21, 21, 21 },
+            { 36, 36, 36 },
+            { 38, 38, 38 },
+            { 110, 110, 110 },
+            { 255, 255, 255 },
+            { 10, 10, 10 },
+            { 245, 245, 245 },
+            { 140, 140, 140 }
+        ),
         Midnight = p(
             { 15, 18, 26 },
             { 18, 22, 31 },
@@ -496,7 +508,7 @@ local a = (function()
             { 142, 124, 108 }
         ),
     }
-    k.ThemeName = "Midnight"
+    k.ThemeName = "Noir"
     k.Assets =
         { Shadow = "rbxassetid://6014261993", Glow = "rbxassetid://8992230677", Logo = "rbxassetid://103859712365480" }
     local q = [[https://raw.githubusercontent.com/Footagesus/Icons/refs/heads/main/lucide/dist/Icons.lua]]
@@ -4741,27 +4753,27 @@ local a = (function()
         if a4.Search ~= false then
             a7:_buildSearch(bs)
         end
-        local bv = ai(
+                local bv = ai(
             "Frame",
             {
                 Name = "Notifications",
-                AnchorPoint = Vector2.new(1, 1),
-                Position = UDim2.new(1, -20, 1, -20),
-                Size = UDim2.new(0, 280, 1, -40),
+                AnchorPoint = E and Vector2.new(0.5, 0) or Vector2.new(1, 1),
+                Position = E and UDim2.new(0.5, 0, 0, 12) or UDim2.new(1, -20, 1, -20),
+                Size = UDim2.new(0, 280, 1, E and -24 or -40),
                 BackgroundTransparency = 1,
                 Parent = bc,
             }
         )
         local function bw()
-            bv.Size = UDim2.new(0, math.min(280, bc.AbsoluteSize.X - 40), 1, -40)
+            bv.Size = UDim2.new(0, math.min(E and 320 or 280, bc.AbsoluteSize.X - (E and 24 or 40)), 1, E and -24 or -40)
         end
         table.insert(a7._connections, bc:GetPropertyChangedSignal("AbsoluteSize"):Connect(bw))
         ai(
             "UIListLayout",
             {
                 SortOrder = Enum.SortOrder.LayoutOrder,
-                VerticalAlignment = Enum.VerticalAlignment.Bottom,
-                Padding = UDim.new(0, 4),
+                VerticalAlignment = E and Enum.VerticalAlignment.Top or Enum.VerticalAlignment.Bottom,
+                Padding = UDim.new(0, 6),
                 Parent = bv,
             }
         )
@@ -9292,6 +9304,7 @@ end
         return bR
     end
     local bO = {
+                "Noir",
         "Midnight",
         "Nebula",
         "Synthwave",
@@ -19082,13 +19095,20 @@ end
             self._keyChipLabel.Text = aI(cb)
         end
     end
-    function a2:Notify(cb)
+        function a2:Notify(cb)
         cb = l(cb, { Text = "Content", Message = "Content", Image = "Icon" })
         if self.Minimized and self._islandActivity then
             self._islandActivity(cb)
         end
-        local cc = cb.Duration or 4
-        local cd = a1[cb.Type] or z.Text
+        local cc = tonumber(cb.Duration) or 4
+        local persist = cc <= 0
+        local cd = a1[cb.Type]
+        local iconName = cb.Icon
+        if iconName == nil then
+            iconName = ({ Success = "circle-check", Warning = "triangle-alert", Error = "circle-x", Info = "info" })[cb.Type]
+                or "bell"
+        end
+        local off = E and UDim2.fromOffset(0, -36) or UDim2.fromOffset(320, 0)
         self._notifyOrder = self._notifyOrder + 1
         local ce = ai(
             "Frame",
@@ -19097,7 +19117,7 @@ end
         local cf = ai(
             "Frame",
             {
-                Position = UDim2.fromOffset(320, 0),
+                Position = off,
                 Size = UDim2.new(1, 0, 0, 0),
                 AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundTransparency = 1,
@@ -19127,10 +19147,11 @@ end
                 BackgroundColor3 = z.Background,
                 BorderSizePixel = 0,
                 GroupTransparency = 1,
+                Active = true,
                 Parent = cf,
             }
         )
-        aj(ch, UDim.new(0, 10))
+        aj(ch, UDim.new(0, 12))
         local ci = ak(ch, z.Stroke)
         ao(ch)
         an(ch, UDim2.fromOffset(260, 120), UDim2.new(1, -10, 0, -10), 0.86, 90)
@@ -19139,17 +19160,19 @@ end
             { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Parent = ch }
         )
         al(cj, 16, 16, 14, 24)
-        local ck = 0
-        if cb.Icon then
-            aB(cj, cb.Icon, cd == z.Text and z.Accent or cd, UDim2.new(0, 0, 0, 8))
-            ck = 24
-        end
+        local badge = ai(
+            "Frame",
+            { Size = UDim2.fromOffset(28, 28), BackgroundColor3 = z.Surface3, BorderSizePixel = 0, Parent = cj }
+        )
+        aj(badge, UDim.new(1, 0))
+        aB(badge, iconName, cd or z.Text, UDim2.new(0.5, -8, 0.5, 0))
+        local ck = 38
         am({
-            Position = UDim2.fromOffset(ck, 0),
+            Position = UDim2.fromOffset(ck, cb.Content and 0 or 6),
             Size = UDim2.new(1, -28 - ck, 0, 16),
             Text = cb.Title or "Notification",
             TextSize = 14,
-            TextColor3 = cd,
+            TextColor3 = z.Text,
             Parent = cj,
         })
         local cl = ai(
@@ -19193,38 +19216,54 @@ end
             {
                 AnchorPoint = Vector2.new(0, 1),
                 Position = UDim2.new(0, 16, 1, -8),
-                Size = UDim2.new(1, -32, 0, 3),
+                Size = UDim2.new(1, -32, 0, 2),
                 BackgroundColor3 = z.Surface3,
                 BorderSizePixel = 0,
+                Visible = not persist,
                 Parent = ch,
             }
         )
         aj(cm, UDim.new(1, 0))
-        local cn =
-            ai("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = z.Accent, BorderSizePixel = 0, Parent = cm })
+        local cn = ai(
+            "Frame",
+            { Size = UDim2.fromScale(1, 1), BackgroundColor3 = cd or z.Accent, BorderSizePixel = 0, Parent = cm }
+        )
         aj(cn, UDim.new(1, 0))
         task.defer(function()
             if ce.Parent then
                 ah(ce, { Size = UDim2.new(1, 0, 0, ch.AbsoluteSize.Y) }, 0.3, Enum.EasingStyle.Quint)
             end
         end)
-        ah(cf, { Position = UDim2.fromOffset(0, 0) }, 0.5, Enum.EasingStyle.Back)
+        local enter = ah(cf, { Position = UDim2.fromOffset(0, 0) }, 0.5, Enum.EasingStyle.Back)
         ah(ch, { GroupTransparency = 0 }, 0.3)
         ah(cg, { ImageTransparency = 0.6 }, 0.4)
-        ah(cn, { Size = UDim2.fromScale(0, 1) }, cc, Enum.EasingStyle.Linear)
-        local co = false
-        local function cp()
-            if co then
+        local prog = (not persist) and ah(cn, { Size = UDim2.fromScale(0, 1) }, cc, Enum.EasingStyle.Linear) or nil
+        local dead, hovering, dragging = false, false, false
+        local startX, dx = 0, 0
+        local moveConn, endConn
+        local function cp(keepPos)
+            if dead then
                 return
             end
-            co = true
+            dead = true
             for cq, cr in ipairs(self._toasts) do
                 if cr == cp then
                     table.remove(self._toasts, cq)
                     break
                 end
             end
-            ah(cf, { Position = UDim2.fromOffset(320, 0) }, 0.3, Enum.EasingStyle.Quint)
+            if moveConn then
+                moveConn:Disconnect()
+            end
+            if endConn then
+                endConn:Disconnect()
+            end
+            if prog then
+                prog:Cancel()
+            end
+            if keepPos ~= true then
+                ah(cf, { Position = off }, 0.3, Enum.EasingStyle.Quint)
+            end
             ah(ch, { GroupTransparency = 1 }, 0.2)
             ah(ci, { Transparency = 1 }, 0.15)
             ah(cg, { ImageTransparency = 1 }, 0.2)
@@ -19236,8 +19275,68 @@ end
                 end)
             end)
         end
-        task.delay(cc, cp)
-        cl.MouseButton1Click:Connect(cp)
+        if prog then
+            prog.Completed:Connect(function(state)
+                if state == Enum.PlaybackState.Completed then
+                    cp()
+                end
+            end)
+        end
+        ch.MouseEnter:Connect(function()
+            hovering = true
+            if prog and not dead then
+                prog:Pause()
+            end
+        end)
+        ch.MouseLeave:Connect(function()
+            hovering = false
+            if prog and not dead and not dragging then
+                prog:Play()
+            end
+        end)
+        ch.InputBegan:Connect(function(input)
+            if dead or not aw(input) then
+                return
+            end
+            dragging, startX, dx = true, input.Position.X, 0
+            if enter then
+                enter:Cancel()
+            end
+            if prog then
+                prog:Pause()
+            end
+        end)
+        moveConn = b.InputChanged:Connect(function(input)
+            if not dragging or not aA(input) then
+                return
+            end
+            dx = input.Position.X - startX
+            local move = E and dx or math.max(dx, 0)
+            cf.Position = UDim2.fromOffset(move, 0)
+            ch.GroupTransparency = math.clamp(math.abs(move) / 240, 0, 0.6)
+        end)
+        endConn = b.InputEnded:Connect(function(input)
+            if not dragging or not aw(input) then
+                return
+            end
+            dragging = false
+            if dead then
+                return
+            end
+            if math.abs(dx) > 70 and (E or dx > 0) then
+                ah(cf, { Position = UDim2.fromOffset(dx > 0 and 320 or -320, 0) }, 0.2, Enum.EasingStyle.Quint)
+                cp(true)
+            else
+                ah(cf, { Position = UDim2.fromOffset(0, 0) }, 0.25, Enum.EasingStyle.Quint)
+                ah(ch, { GroupTransparency = 0 }, 0.2)
+                if prog and not hovering then
+                    prog:Play()
+                end
+            end
+        end)
+        cl.MouseButton1Click:Connect(function()
+            cp()
+        end)
         table.insert(self._toasts, cp)
         while #self._toasts > self.MaxNotifications do
             local cq = table.remove(self._toasts, 1)
