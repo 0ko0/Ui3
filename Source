@@ -6544,7 +6544,7 @@ end
     end
     function a2:_createToggleButton(a7)
         local a8 = self.Gui
-        local a9 = tonumber(a7.Size) or (E and 56 or 50)
+        local a9 = tonumber(a7.Size) or (E and 42 or 40)
         local ba = math.floor(a9 * 0.46)
         self._toggleEnabled = a7.Enabled ~= false
         self._togglePlatform = a7.Platform == "Both" and "Both" or "Mobile"
@@ -6565,7 +6565,7 @@ end
                 Parent = a8,
             }
         )
-        aj(bb, UDim.new(0, 12))
+        aj(bb, UDim.new(1, 0))
         local bc = ak(bb, z.Stroke)
         local bd = ai(
             "ImageLabel",
