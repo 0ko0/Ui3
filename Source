@@ -6584,7 +6584,7 @@ end
         self.ToggleButton = bb
         self._toggleStroke = bc
         self._toggleIcon = bd
-        self:SetToggleButtonIcon(a7.Icon or "layout-grid")
+        self:SetToggleButtonIcon(a7.Icon or "fingerprint-pattern")
         local bf, bg = false, false
         local bh = Vector2.zero
         bb.InputBegan:Connect(function(bi)
