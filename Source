@@ -5703,6 +5703,20 @@ local a = (function()
             local bd = self.Root
             return bd.AbsolutePosition + bd.AbsoluteSize * bd.AnchorPoint - self.Gui.AbsolutePosition
         end
+        
+                local function dragZone(bf)
+            local rel = bf - self.Body.AbsolutePosition
+            local scale = self.Scale.Scale
+            if rel.Y < 0 then
+                return false
+            end
+            if rel.X <= self.Sidebar.AbsoluteSize.X then
+                return rel.Y <= G * scale
+            end
+            local tab = self.CurrentTab
+            return rel.Y <= ((tab and tab._headerBottom) or G) * scale
+        end
+        
         local function bd()
             if not ba then
                 return
@@ -5730,14 +5744,8 @@ local a = (function()
                 local bf = av()
                 if self._resizeActive or (self._grip and az(bf, self._grip)) then
                     return
-                end                                
-                local body = self.Body
-                local bp, bs = body.AbsolutePosition, body.AbsoluteSize
-                
-                local edge = (be.UserInputType == Enum.UserInputType.Touch and 18 or 10) * self.Scale.Scale
-                local inner = bf.X > bp.X + edge and bf.X < bp.X + bs.X - edge
-                    and bf.Y > bp.Y + edge and bf.Y < bp.Y + bs.Y - edge
-                if not az(bf, body) or inner or self:_overControl(bf) then
+                end
+                                if not az(bf, self.Body) or not dragZone(bf) or self:_overControl(bf) then
                     return
                 end
                 if self._clampTween then
