@@ -2058,864 +2058,1178 @@ local a = (function()
         task.defer(bb, true)
         return m(self, aU, bh, a2, "Slider")
     end
-    function aS:Dropdown(aU)
-        aU = l(
-            aU,
-            {
-                Title = "Name",
-                Description = "Desc",
-                CurrentOption = "Default",
-                Value = "Default",
-                MultipleOptions = "Multi",
-                Values = "Options",
-            }
-        )
-        if aU.Multi and type(aU.Default) ~= "table" and aU.Default ~= nil then
-            aU.Default = { aU.Default }
-        elseif not aU.Multi and type(aU.Default) == "table" then
-            aU.Default = aU.Default[1]
+    function aS:Dropdown(opt)
+        opt = l(opt, {
+            Title = "Name",
+            Description = "Desc",
+            CurrentOption = "Default",
+            Value = "Default",
+            MultipleOptions = "Multi",
+            Values = "Options",
+        })
+        if opt.Multi and type(opt.Default) ~= "table" and opt.Default ~= nil then
+            opt.Default = { opt.Default }
+        elseif not opt.Multi and type(opt.Default) == "table" then
+            opt.Default = opt.Default[1]
         end
-        local aV = aU.Multi == true
-        local aW = aU.Options or {}
-        local aX, aY, aZ
-        aU, aX, aY, aZ = aQ(self, aU, {}, "Frame")
-        local a_ = aM(self)
-        local a0 = a_.Compact
-        local a1 = a_.Chip
-        local a2 = self.Window
-        local a3 = E and 40 or 30
-        local a4 = aU.MaxRows or 6
-        local a5 = a0 and aU.Stacked == true
-        local a6 = 2
-        if a5 then
-            a6 = (aU.Name or "") ~= "" and 20 or 2
-            a1 = E and 34 or 30
-            aZ = a6 + a1 + 4
-            aX.Size = UDim2.new(1, 0, 0, aZ)
+        local isMulti = opt.Multi == true
+
+        local foldMap = k._foldMap
+        if not foldMap then
+            foldMap = {}
+            for _, group in ipairs({
+                { "a", "\u{e0}\u{e1}\u{1ea3}\u{e3}\u{1ea1}\u{103}\u{1eb1}\u{1eaf}\u{1eb3}\u{1eb5}\u{1eb7}\u{e2}\u{1ea7}\u{1ea5}\u{1ea9}\u{1eab}\u{1ead}\u{e4}\u{e5}", "\u{c0}\u{c1}\u{1ea2}\u{c3}\u{1ea0}\u{102}\u{1eb0}\u{1eae}\u{1eb2}\u{1eb4}\u{1eb6}\u{c2}\u{1ea6}\u{1ea4}\u{1ea8}\u{1eaa}\u{1eac}\u{c4}\u{c5}" },
+                { "e", "\u{e8}\u{e9}\u{1ebb}\u{1ebd}\u{1eb9}\u{ea}\u{1ec1}\u{1ebf}\u{1ec3}\u{1ec5}\u{1ec7}\u{eb}", "\u{c8}\u{c9}\u{1eba}\u{1ebc}\u{1eb8}\u{ca}\u{1ec0}\u{1ebe}\u{1ec2}\u{1ec4}\u{1ec6}\u{cb}" },
+                { "i", "\u{ec}\u{ed}\u{1ec9}\u{129}\u{1ecb}\u{ef}", "\u{cc}\u{cd}\u{1ec8}\u{128}\u{1eca}\u{cf}" },
+                { "o", "\u{f2}\u{f3}\u{1ecf}\u{f5}\u{1ecd}\u{f4}\u{1ed3}\u{1ed1}\u{1ed5}\u{1ed7}\u{1ed9}\u{1a1}\u{1edd}\u{1edb}\u{1edf}\u{1ee1}\u{1ee3}\u{f6}", "\u{d2}\u{d3}\u{1ece}\u{d5}\u{1ecc}\u{d4}\u{1ed2}\u{1ed0}\u{1ed4}\u{1ed6}\u{1ed8}\u{1a0}\u{1edc}\u{1eda}\u{1ede}\u{1ee0}\u{1ee2}\u{d6}" },
+                { "u", "\u{f9}\u{fa}\u{1ee7}\u{169}\u{1ee5}\u{1b0}\u{1eeb}\u{1ee9}\u{1eed}\u{1eef}\u{1ef1}\u{fc}", "\u{d9}\u{da}\u{1ee6}\u{168}\u{1ee4}\u{1af}\u{1eea}\u{1ee8}\u{1eec}\u{1eee}\u{1ef0}\u{dc}" },
+                { "y", "\u{1ef3}\u{fd}\u{1ef7}\u{1ef9}\u{1ef5}\u{ff}", "\u{1ef2}\u{dd}\u{1ef6}\u{1ef8}\u{1ef4}\u{178}" },
+                { "d", "\u{111}", "\u{110}" },
+                { "n", "\u{f1}", "\u{d1}" },
+                { "c", "\u{e7}", "\u{c7}" },
+            }) do
+                for index = 2, #group do
+                    for ch in string.gmatch(group[index], utf8.charpattern) do
+                        foldMap[ch] = group[1]
+                    end
+                end
+            end
+            k._foldMap = foldMap
         end
-        local a7 = ai(
-            "TextButton",
-            { Size = UDim2.new(1, 0, 0, aZ), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Parent = aX }
-        )
-        local a8, a9
-        if not a5 then
-            a8, a9 = aP(a7, aU.Name or "Dropdown", aU.Desc, 180, a_)
-        elseif a6 > 2 then
-            a8 = am({
+        local function foldText(text)
+            text = string.lower(text)
+            if string.find(text, "[\128-\255]") then
+                text = string.gsub(text, utf8.charpattern, foldMap)
+            end
+            return text
+        end
+        local function escapeRich(text)
+            return (text:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
+        end
+        local function utf8Length(text)
+            return utf8.len(text) or #text
+        end
+        local function utf8Prefix(text, count)
+            if count <= 0 then
+                return ""
+            end
+            local ok, position = pcall(utf8.offset, text, count + 1)
+            if ok and position then
+                return string.sub(text, 1, position - 1)
+            end
+            return string.sub(text, 1, count)
+        end
+        
+        local function foldChars(text)
+            local parts, byteChar, charStart, charEnd = {}, {}, {}, {}
+            local count, bytes = 0, 0
+            for position, ch in string.gmatch(text, "()(" .. utf8.charpattern .. ")") do
+                count += 1
+                charStart[count] = position
+                charEnd[count] = position + #ch - 1
+                local folded = foldMap[ch] or string.lower(ch)
+                parts[count] = folded
+                for _ = 1, #folded do
+                    bytes += 1
+                    byteChar[bytes] = count
+                end
+            end
+            return table.concat(parts), byteChar, charStart, charEnd
+        end
+
+        local options, foldedOf = {}, {}
+        local function setOptions(list)
+            options, foldedOf = {}, {}
+            for _, option in ipairs(type(list) == "table" and list or {}) do
+                if option ~= nil and foldedOf[option] == nil then
+                    options[#options + 1] = option
+                    foldedOf[option] = foldText(tostring(option))
+                end
+            end
+        end
+        setOptions(opt.Options)
+
+        local frame, frameStroke, rowHeight
+        opt, frame, frameStroke, rowHeight = aQ(self, opt, {}, "Frame")
+        local metrics = aM(self)
+        local compact = metrics.Compact
+        local chipH = metrics.Chip
+        local window = self.Window
+        local itemH = E and 40 or 30
+        local maxRows = opt.MaxRows or 6
+        local stacked = compact and opt.Stacked == true
+        local topPad = 2
+        if stacked then
+            topPad = (opt.Name or "") ~= "" and 20 or 2
+            chipH = E and 34 or 30
+            rowHeight = topPad + chipH + 4
+            frame.Size = UDim2.new(1, 0, 0, rowHeight)
+        end
+        local button = ai("TextButton", {
+            Size = UDim2.new(1, 0, 0, rowHeight),
+            BackgroundTransparency = 1,
+            Text = "",
+            AutoButtonColor = false,
+            Parent = frame,
+        })
+        local titleLabel, descLabel
+        if not stacked then
+            titleLabel, descLabel = aP(button, opt.Name or "Dropdown", opt.Desc, 180, metrics)
+        elseif topPad > 2 then
+            titleLabel = am({
                 Position = UDim2.fromOffset(14, 1),
                 Size = UDim2.new(1, -28, 0, 16),
-                Text = aU.Name,
-                TextSize = a_.TextSize,
-                Parent = a7,
+                Text = opt.Name,
+                TextSize = metrics.TextSize,
+                Parent = button,
             })
         end
-        local ba = ai(
-            "Frame",
-            {
-                AnchorPoint = a5 and Vector2.zero or Vector2.new(1, 0.5),
-                Position = a5 and UDim2.fromOffset(14, a6) or UDim2.new(1, a0 and -14 or -10, 0.5, 0),
-                Size = UDim2.fromOffset(60, a1),
-                BackgroundColor3 = z.Surface,
-                BorderSizePixel = 0,
-                ClipsDescendants = true,
-                Parent = a7,
-            }
-        )
-        aj(ba, UDim.new(0, 6))
-        local bb = ak(ba)
-        local bc = am({
+        local chip = ai("Frame", {
+            AnchorPoint = stacked and Vector2.zero or Vector2.new(1, 0.5),
+            Position = stacked and UDim2.fromOffset(14, topPad) or UDim2.new(1, compact and -14 or -10, 0.5, 0),
+            Size = UDim2.fromOffset(60, chipH),
+            BackgroundColor3 = z.Surface,
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+            Parent = button,
+        })
+        aj(chip, UDim.new(0, 6))
+        local chipStroke = ak(chip)
+        local valueLabel = am({
             Position = UDim2.fromOffset(10, 0),
             Size = UDim2.new(1, -34, 1, 0),
             TextColor3 = z.Muted,
             TextSize = 13,
             TextTruncate = Enum.TextTruncate.None,
             ClipsDescendants = true,
-            Parent = ba,
+            Parent = chip,
         })
-        local bd = aC(ba, 1, -6)
-        local be = am({
-            Size = UDim2.fromOffset(0, a1),
+        local arrow = aC(chip, 1, -6)
+        local measure = am({
+            Size = UDim2.fromOffset(0, chipH),
             AutomaticSize = Enum.AutomaticSize.X,
             TextSize = 13,
             Visible = false,
-            Parent = ba,
+            Parent = chip,
         })
-        local bf = ""
-        local function bg()
-            local bh = (a5 and aX.AbsoluteSize.X / a2.Scale.Scale - 28 or a0 and aN(aX, a2) or 190) - 10 - 34
-            be.Text = bf
-            if be.TextBounds.X <= bh then
-                return bf
+        local displayText = ""
+        local function fitText()
+            local maxWidth = (stacked and frame.AbsoluteSize.X / window.Scale.Scale - 28 or compact and aN(frame, window) or 190) - 10 - 34
+            measure.Text = displayText
+            if measure.TextBounds.X <= maxWidth then
+                return displayText
             end
-            local bi = bf
-            while #bi > 1 do
-                bi = bi:sub(1, -2)
-                be.Text = bi .. ".."
-                if be.TextBounds.X <= bh then
-                    return bi .. ".."
+            
+            local low, high, best = 1, utf8Length(displayText) - 1, 0
+            while low <= high do
+                local mid = math.floor((low + high) / 2)
+                measure.Text = utf8Prefix(displayText, mid) .. ".."
+                if measure.TextBounds.X <= maxWidth then
+                    best = mid
+                    low = mid + 1
+                else
+                    high = mid - 1
                 end
             end
-            return ".."
+            return best > 0 and (utf8Prefix(displayText, best) .. "..") or ".."
         end
-        local function bh(bi)
-            if a5 then
-                ba.Size = UDim2.new(1, -28, 0, a1)
+        local function resizeChip(instant)
+            if stacked then
+                chip.Size = UDim2.new(1, -28, 0, chipH)
                 return
             end
-            local bj
-            if a0 then
-                bj = aN(aX, a2)
+            local width
+            if compact then
+                width = aN(frame, window)
             else
-                bj = math.clamp(bc.TextBounds.X + 10 + 34, 60, 190)
+                width = math.clamp(valueLabel.TextBounds.X + 10 + 34, 60, 190)
             end
-            aR(a8, a9, bj + (a0 and 24 or 20))
-            if bi then
-                ba.Size = UDim2.fromOffset(bj, a1)
+            aR(titleLabel, descLabel, width + (compact and 24 or 20))
+            if instant then
+                chip.Size = UDim2.fromOffset(width, chipH)
             else
-                ah(ba, { Size = UDim2.fromOffset(bj, a1) }, 0.2)
+                ah(chip, { Size = UDim2.fromOffset(width, chipH) }, 0.2)
             end
         end
-        bc:GetPropertyChangedSignal("TextBounds"):Connect(function()
-            if not a0 then
-                bh(false)
+        valueLabel:GetPropertyChangedSignal("TextBounds"):Connect(function()
+            if not compact then
+                resizeChip(false)
             end
         end)
-        if a0 then
-            local bi, bj = 0, false
-            aX:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-                local bk = aX.AbsoluteSize.X
-                if bk == bi then
+        if compact then
+            local lastWidth, pending = 0, false
+            frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+                local width = frame.AbsoluteSize.X
+                if width == lastWidth then
                     return
                 end
-                bi = bk
-                bh(true)
-                if not bj then
-                    bj = true
+                lastWidth = width
+                resizeChip(true)
+                if not pending then
+                    pending = true
                     task.delay(0.12, function()
-                        bj = false
-                        bc.Text = bg()
+                        pending = false
+                        valueLabel.Text = fitText()
                     end)
                 end
             end)
         end
-        local bi = ai(
-            "Frame",
-            {
-                AnchorPoint = Vector2.new(1, 0),
-                Size = UDim2.fromOffset(220, 0),
-                BackgroundTransparency = 1,
-                Visible = false,
-                ZIndex = 45,
-                Parent = a2.Body,
-            }
-        )
-        bi:SetAttribute("NoDrag", true)
-        local bj = ai(
-            "ImageLabel",
-            {
-                Position = UDim2.fromOffset(-18, -12),
-                Size = UDim2.new(1, 36, 1, 36),
-                BackgroundTransparency = 1,
-                Image = A.Shadow,
-                ImageColor3 = Color3.new(0, 0, 0),
-                ImageTransparency = 1,
-                ScaleType = Enum.ScaleType.Slice,
-                SliceCenter = Rect.new(49, 49, 450, 450),
-                Parent = bi,
-            }
-        )
-        local bk = ai(
-            "Frame",
-            { Size = UDim2.fromScale(1, 1), BackgroundColor3 = z.Background, BorderSizePixel = 0, ClipsDescendants = true, Parent = bi }
-        )
-        aj(bk, UDim.new(0, 10))
-        local bl = ak(bk, z.Stroke, 1)
-        ao(bk)
-        local bm = ai("Frame", { Size = UDim2.new(1, 0, 0, 120), BackgroundTransparency = 1, Parent = bk })
-        al(bm, 8, 8, 8, 8)
-        local bn = ai(
-            "Frame",
-            { Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = z.Surface, BorderSizePixel = 0, Parent = bm }
-        )
-        aj(bn, UDim.new(0, 7))
-        local bo = ak(bn)
-        local bp, bq = aB(bn, "search", z.Muted, UDim2.new(0, 10, 0.5, 0))
-        bp.Size = UDim2.fromOffset(14, 14)
-        local br = ai(
-            "TextBox",
-            {
-                Position = UDim2.fromOffset(32, 0),
-                Size = UDim2.new(1, -40, 1, 0),
-                BackgroundTransparency = 1,
-                Text = "",
-                PlaceholderText = aU.SearchPlaceholder or "Search",
-                PlaceholderColor3 = z.Muted,
-                TextColor3 = z.Text,
-                TextSize = 13,
-                FontFace = D.Regular,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                ClearTextOnFocus = false,
-                Parent = bn,
-            }
-        )
-        br.Focused:Connect(function()
-            ah(bo, { Color = z.StrokeHover }, 0.15)
-            ah(bq, { ImageColor3 = z.Accent }, 0.15)
+
+        local popup = ai("Frame", {
+            AnchorPoint = Vector2.new(1, 0),
+            Size = UDim2.fromOffset(220, 0),
+            BackgroundTransparency = 1,
+            Visible = false,
+            ZIndex = 45,
+            Parent = window.Body,
+        })
+        popup:SetAttribute("NoDrag", true)
+        local shadow = ai("ImageLabel", {
+            Position = UDim2.fromOffset(-18, -12),
+            Size = UDim2.new(1, 36, 1, 36),
+            BackgroundTransparency = 1,
+            Image = A.Shadow,
+            ImageColor3 = Color3.new(0, 0, 0),
+            ImageTransparency = 1,
+            ScaleType = Enum.ScaleType.Slice,
+            SliceCenter = Rect.new(49, 49, 450, 450),
+            Parent = popup,
+        })
+        local content = ai("Frame", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundColor3 = z.Background,
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+            Parent = popup,
+        })
+        aj(content, UDim.new(0, 10))
+        local popupStroke = ak(content, z.Stroke, 1)
+        ao(content)
+        local padded = ai("Frame", { Size = UDim2.new(1, 0, 0, 120), BackgroundTransparency = 1, Parent = content })
+        al(padded, 8, 8, 8, 8)
+
+        local searchBar = ai("Frame", {
+            Size = UDim2.new(1, 0, 0, 32),
+            BackgroundColor3 = z.Surface,
+            BorderSizePixel = 0,
+            Parent = padded,
+        })
+        aj(searchBar, UDim.new(0, 7))
+        local searchStroke = ak(searchBar)
+        local searchIcon, searchIconImage = aB(searchBar, "search", z.Muted, UDim2.new(0, 10, 0.5, 0))
+        searchIcon.Size = UDim2.fromOffset(14, 14)
+        local searchBox = ai("TextBox", {
+            Position = UDim2.fromOffset(32, 0),
+            Size = UDim2.new(1, -40, 1, 0),
+            BackgroundTransparency = 1,
+            Text = "",
+            PlaceholderText = opt.SearchPlaceholder or "Search",
+            PlaceholderColor3 = z.Muted,
+            TextColor3 = z.Text,
+            TextSize = 13,
+            FontFace = D.Regular,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ClearTextOnFocus = false,
+            Parent = searchBar,
+        })
+        searchBox.Focused:Connect(function()
+            ah(searchStroke, { Color = z.StrokeHover }, 0.15)
+            ah(searchIconImage, { ImageColor3 = z.Accent }, 0.15)
         end)
-        br.FocusLost:Connect(function()
-            ah(bo, { Color = z.Stroke }, 0.2)
-            ah(bq, { ImageColor3 = z.Muted }, 0.2)
-        end)
-        local bs = ai("Frame", { Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, Visible = aV, Parent = bm })
-        local function bt(bu, bv)
-            local bw = ai(
-                "TextButton",
-                {
-                    Position = bv,
-                    Size = UDim2.new(0.5, -3, 1, 0),
-                    BackgroundColor3 = z.Surface3,
-                    BackgroundTransparency = 0.35,
-                    BorderSizePixel = 0,
-                    Text = "",
-                    AutoButtonColor = false,
-                    ClipsDescendants = true,
-                    Parent = bs,
-                }
-            )
-            aj(bw, UDim.new(0, 6))
-            local bx = ak(bw)
-            am({ Size = UDim2.fromScale(1, 1), Text = bu, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Center, Parent = bw })
-            bw.MouseEnter:Connect(function()
-                ah(bw, { BackgroundTransparency = 0.05 }, 0.15)
-                ah(bx, { Color = z.StrokeHover }, 0.15)
-            end)
-            bw.MouseLeave:Connect(function()
-                ah(bw, { BackgroundTransparency = 0.35 }, 0.25)
-                ah(bx, { Color = z.Stroke }, 0.25)
-            end)
-            bw.MouseButton1Click:Connect(function()
-                aE(bw)
-            end)
-            return bw
-        end
-        local bu = bt(aU.SelectAllText or "Select all", UDim2.fromOffset(0, 0))
-        local bv = bt(aU.ClearAllText or "Clear all", UDim2.new(0.5, 3, 0, 0))
-        local bw = ai(
-            "ScrollingFrame",
-            {
-                Size = UDim2.new(1, 0, 0, 100),
-                BackgroundTransparency = 1,
+
+        local toolbar = ai("Frame", {
+            Size = UDim2.new(1, 0, 0, 28),
+            BackgroundTransparency = 1,
+            Visible = isMulti,
+            Parent = padded,
+        })
+        local function makeToolbarButton(text, position)
+            local toolButton = ai("TextButton", {
+                Position = position,
+                Size = UDim2.new(0.5, -3, 1, 0),
+                BackgroundColor3 = z.Surface3,
+                BackgroundTransparency = 0.35,
                 BorderSizePixel = 0,
-                ScrollBarThickness = E and 4 or 3,
-                ScrollBarImageColor3 = z.Accent,
-                ScrollBarImageTransparency = 0.4,
-                ScrollingDirection = Enum.ScrollingDirection.Y,
-                CanvasSize = UDim2.new(),
-                Parent = bm,
-            }
-        )
-        ai("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = bw })
-        local bx = am({
-            Size = UDim2.new(1, 0, 0, a3),
-            Text = aU.NoResultsText or "No results",
+                Text = "",
+                AutoButtonColor = false,
+                ClipsDescendants = true,
+                Parent = toolbar,
+            })
+            aj(toolButton, UDim.new(0, 6))
+            local toolStroke = ak(toolButton)
+            am({
+                Size = UDim2.fromScale(1, 1),
+                Text = text,
+                TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Center,
+                Parent = toolButton,
+            })
+            toolButton.MouseEnter:Connect(function()
+                ah(toolButton, { BackgroundTransparency = 0.05 }, 0.15)
+                ah(toolStroke, { Color = z.StrokeHover }, 0.15)
+            end)
+            toolButton.MouseLeave:Connect(function()
+                ah(toolButton, { BackgroundTransparency = 0.35 }, 0.25)
+                ah(toolStroke, { Color = z.Stroke }, 0.25)
+            end)
+            toolButton.MouseButton1Click:Connect(function()
+                aE(toolButton)
+            end)
+            return toolButton
+        end
+        local selectAllButton = makeToolbarButton(opt.SelectAllText or "Select all", UDim2.fromOffset(0, 0))
+        local clearAllButton = makeToolbarButton(opt.ClearAllText or "Clear all", UDim2.new(0.5, 3, 0, 0))
+
+        local list = ai("ScrollingFrame", {
+            Size = UDim2.new(1, 0, 0, 100),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ScrollBarThickness = E and 4 or 3,
+            ScrollBarImageColor3 = z.Accent,
+            ScrollBarImageTransparency = 0.4,
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+            CanvasSize = UDim2.new(),
+            Parent = padded,
+        })
+        local emptyLabel = am({
+            Size = UDim2.new(1, 0, 0, itemH),
+            Text = opt.NoResultsText or "No results",
             TextSize = 13,
             FontFace = D.Regular,
             TextColor3 = z.Muted,
             TextXAlignment = Enum.TextXAlignment.Center,
-            LayoutOrder = 0,
             Visible = false,
-            Parent = bw,
+            Parent = list,
         })
+
+        local STEP = itemH + 2 
+        local BUFFER = 4 
         local by = { Open = false }
-        local bz = {}
-        local bA = {}
-        local bB = ""
-        local function bC(bD)
-            return bB == "" or string.find(string.lower(tostring(bD)), bB, 1, true) ~= nil
-        end
-        local function bD(bE)
-            return (bE:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
-        end
-        local function bE(bF)
-            local bG = tostring(bF)
-            local bH = bB ~= "" and string.find(string.lower(bG), bB, 1, true)
-            if not bH then
-                return bD(bG)
+        local selected = {}
+        if isMulti then
+            for _, value in ipairs(opt.Default or {}) do
+                selected[value] = true
             end
-            local bI = bH + #bB - 1
-            return bD(bG:sub(1, bH - 1))
-                .. '<font color="#'
-                .. z.Accent:ToHex()
-                .. '"><b>'
-                .. bD(bG:sub(bH, bI))
-                .. "</b></font>"
-                .. bD(bG:sub(bI + 1))
+        elseif opt.Default ~= nil then
+            selected[opt.Default] = true
         end
-        if aV then
-            for bF, bG in ipairs(aU.Default or {}) do
-                bz[bG] = true
-            end
-        elseif aU.Default ~= nil then
-            bz[aU.Default] = true
-        end
-        local function bF()
-            if aV then
-                local bG = {}
-                for bH, bI in ipairs(aW) do
-                    if bz[bI] then
-                        table.insert(bG, bI)
+        local query, tokens = "", {}
+        local filtered = options
+        local active, activeSource = nil, nil
+        local rows, rowAt = {}, {}
+        local firstShown, lastShown = nil, nil
+        local canvasH, listH = 0, 0
+        local popupSize = Vector2.new(220, 120)
+        local popupReady = false
+        local searchVisible = true
+        local parentScroller, lockedScroller = nil, nil
+        local renderConn = nil
+        local openToken = 0
+        local lastActivate = 0
+        local setActive, toggleOption, setOpen
+
+        local function getValue()
+            if isMulti then
+                local out = {}
+                for _, option in ipairs(options) do
+                    if selected[option] then
+                        out[#out + 1] = option
                     end
                 end
-                return bG
+                return out
             end
-            for bG, bH in ipairs(aW) do
-                if bz[bH] then
-                    return bH
+            for _, option in ipairs(options) do
+                if selected[option] then
+                    return option
                 end
             end
             return nil
         end
-        local function bG(bH, bI)
-            local bJ, bK = bH.On == true, bH.Hover == true
-            ah(
-                bH.Frame,
-                {
-                    BackgroundColor3 = bJ and z.Accent or z.Surface3,
-                    BackgroundTransparency = bJ and (bK and 0.8 or 0.88) or (bK and 0.55 or 1),
-                },
-                bI
-            )
-            ah(bH.Label, { TextColor3 = (bJ or bK) and z.Text or z.Muted }, bI)
+
+        local function tokenize(text)
+            local result = {}
+            for word in string.gmatch(foldText(text), "%S+") do
+                result[#result + 1] = word
+            end
+            return result
         end
-        local function bH(bI, bJ)
-            local bK = bz[bI.Option] == true
-            if bI.On == bK and bJ then
+        local function rebuildFiltered()
+            if #tokens == 0 then
+                filtered = options
                 return
             end
-            bI.On = bK
-            local bL = bJ and 0.18 or 0
-            bG(bI, bL)
-            if aV then
-                ah(bI.Box, { BackgroundColor3 = bK and z.Accent or z.Surface2 }, bL)
-                ah(bI.BoxStroke, { Color = bK and z.Accent or z.Stroke }, bL)
-            else
-                ah(
-                    bI.Bar,
-                    { BackgroundTransparency = bK and 0 or 1, Size = UDim2.fromOffset(3, bK and a3 - 14 or 4) },
-                    bJ and 0.3 or 0,
-                    Enum.EasingStyle.Quint
-                )
-            end
-            ah(bI.Check, { ImageTransparency = bK and 0 or 1 }, bL)
-            if bJ and bK then
-                bI.CheckScale.Scale = 0.5
-                ah(bI.CheckScale, { Scale = 1 }, 0.3, Enum.EasingStyle.Back)
-            else
-                bI.CheckScale.Scale = 1
+            filtered = {}
+            for _, option in ipairs(options) do
+                local folded = foldedOf[option]
+                local matched = true
+                for _, token in ipairs(tokens) do
+                    if not string.find(folded, token, 1, true) then
+                        matched = false
+                        break
+                    end
+                end
+                if matched then
+                    filtered[#filtered + 1] = option
+                end
             end
         end
-        local function bI(bJ)
-            local bK = bF()
-            if #aW == 0 then
-                bf = aU.EmptyText or "None"
-            elseif aV then
-                if #bK > 2 then
-                    bf = tostring(bK[1]) .. ", " .. tostring(bK[2]) .. "  +" .. (#bK - 2)
+        local function labelFor(option)
+            local text = tostring(option)
+            if #tokens == 0 then
+                return escapeRich(text)
+            end
+            local folded, byteChar, charStart, charEnd
+            if string.find(text, "[\128-\255]") then
+                folded, byteChar, charStart, charEnd = foldChars(text)
+            else
+                folded = string.lower(text)
+            end
+            local ranges = {}
+            for _, token in ipairs(tokens) do
+                local first, last = string.find(folded, token, 1, true)
+                if first then
+                    if byteChar then
+                        first, last = charStart[byteChar[first]], charEnd[byteChar[last]]
+                    end
+                    if first and last then
+                        ranges[#ranges + 1] = { first, last }
+                    end
+                end
+            end
+            if #ranges == 0 then
+                return escapeRich(text)
+            end
+            table.sort(ranges, function(x, y)
+                return x[1] < y[1]
+            end)
+            local merged = {}
+            for _, range in ipairs(ranges) do
+                local previous = merged[#merged]
+                if previous and range[1] <= previous[2] + 1 then
+                    if range[2] > previous[2] then
+                        previous[2] = range[2]
+                    end
                 else
-                    bf = #bK > 0 and table.concat(bK, ", ") or (aU.NoneText or "None")
-                end
-            else
-                bf = bK ~= nil and tostring(bK) or (aU.NoneText or "None")
-            end
-            bc.Text = bg()
-            local bL = #aW > 0 and (if aV then #bK > 0 else bK ~= nil)
-            ah(bc, { TextColor3 = bL and z.Text or z.Muted }, bJ and 0.15 or 0)
-            for bM, bN in pairs(bA) do
-                bH(bN, bJ)
-            end
-        end
-        local function bJ()
-            local bK = 0
-            for bL, bM in ipairs(aW) do
-                if bC(bM) then
-                    bK += 1
+                    merged[#merged + 1] = { range[1], range[2] }
                 end
             end
-            return bK
+            local hex = z.Accent:ToHex()
+            local parts, position = {}, 1
+            for _, range in ipairs(merged) do
+                parts[#parts + 1] = escapeRich(string.sub(text, position, range[1] - 1))
+                parts[#parts + 1] = '<font color="#' .. hex .. '"><b>' .. escapeRich(string.sub(text, range[1], range[2])) .. "</b></font>"
+                position = range[2] + 1
+            end
+            parts[#parts + 1] = escapeRich(string.sub(text, position))
+            return table.concat(parts)
         end
-        local bK = true
-        local bL = Vector2.new(220, 120)
-        local bM = false
-        local function bN(bO)
-            bK = aU.Searchable ~= false and #aW > (aU.SearchAfter or 0)
-            bn.Visible = bK
-            local bP = 0
-            if bK then
-                bP += 38
+
+        local function rowTween(row, instance, props, time, style)
+            local tween = ah(instance, props, time, style)
+            if tween then
+                local pendingTweens = row.Tweens
+                pendingTweens[#pendingTweens + 1] = tween
+                if #pendingTweens > 8 then
+                    table.remove(pendingTweens, 1)
+                end
             end
-            bs.Position = UDim2.fromOffset(0, bP)
-            if aV and #aW > 0 then
-                bs.Visible = true
-                bP += 34
-            else
-                bs.Visible = false
+        end
+        local function paintHover(row, time)
+            local on, hover = row.On == true, row.Hover == true
+            rowTween(row, row.Frame, {
+                BackgroundColor3 = on and z.Accent or z.Surface3,
+                BackgroundTransparency = on and (hover and 0.8 or 0.88) or (hover and 0.55 or 1),
+            }, time)
+            rowTween(row, row.Label, { TextColor3 = (on or hover) and z.Text or z.Muted }, time)
+            if row.BoxStroke and not on then
+                rowTween(row, row.BoxStroke, { Color = hover and z.StrokeHover or z.Stroke }, time)
             end
-            local bQ = bJ()
-            bx.Visible = bQ == 0
-            local bR = math.clamp(bQ, 1, a4)
-            local bS = bR * a3 + (bR - 1) * 2
-            bw.CanvasSize = UDim2.fromOffset(0, math.max(bQ, 1) * (a3 + 2) - 2)
-            local bT = a2.Scale.Scale
-            local bU = a2:_popupHost(aX)
-            local bV = bU.AbsoluteSize.Y / bT
-            local bW = (ba.AbsolutePosition.Y - bU.AbsolutePosition.Y) / bT
-            local bX = math.max(bV - (bW + ba.AbsoluteSize.Y / bT) - 14, bW - 14) - bP - 16
-            if bX >= a3 then
-                bS = math.min(bS, bX)
-            end
-            bw.Position = UDim2.fromOffset(0, bP)
-            bw.Size = UDim2.new(1, 0, 0, bS)
-            local bY = math.max(math.floor(ba.AbsoluteSize.X / bT), aU.PopupWidth or 210)
-            local bZ = bU.AbsoluteSize.X / bT
-            bY = math.min(bY, math.max(bZ - 16, 120))
-            bL = Vector2.new(bY, bP + bS + 16)
-            bm.Size = UDim2.new(1, 0, 0, bL.Y)
-            if not bM then
+        end
+        local function paintSelected(row, animate)
+            local on = selected[row.Option] == true
+            if row.On == on and animate then
                 return
             end
-            if bO then
-                bi.Size = UDim2.fromOffset(bL.X, bL.Y)
+            row.On = on
+            local time = animate and 0.18 or 0
+            paintHover(row, time)
+            if isMulti then
+                rowTween(row, row.Box, { BackgroundColor3 = on and z.Accent or z.Surface2 }, time)
+                rowTween(row, row.BoxStroke, { Color = on and z.Accent or (row.Hover and z.StrokeHover or z.Stroke) }, time)
             else
-                ah(bi, { Size = UDim2.fromOffset(bL.X, bL.Y) }, 0.22, Enum.EasingStyle.Quint)
+                rowTween(row, row.Bar, {
+                    BackgroundTransparency = on and 0 or 1,
+                    Size = UDim2.fromOffset(3, on and itemH - 14 or 4),
+                }, animate and 0.3 or 0, Enum.EasingStyle.Quint)
+            end
+            rowTween(row, row.Check, { ImageTransparency = on and 0 or 1 }, time)
+            if animate and on then
+                row.CheckScale.Scale = 0.5
+                rowTween(row, row.CheckScale, { Scale = 1 }, 0.3, Enum.EasingStyle.Back)
+            else
+                row.CheckScale.Scale = 1
             end
         end
-        local function bO()
-            for bP, bQ in pairs(bA) do
-                local bR = bC(bP)
-                bQ.Frame.Visible = bR
-                if bR then
-                    bQ.Label.Text = bE(bP)
+        local function refreshDisplay(animated)
+            local value = getValue()
+            if #options == 0 then
+                displayText = opt.EmptyText or "None"
+            elseif isMulti then
+                if #value > 2 then
+                    displayText = tostring(value[1]) .. ", " .. tostring(value[2]) .. "  +" .. (#value - 2)
+                else
+                    local names = {}
+                    for index, option in ipairs(value) do
+                        names[index] = tostring(option)
+                    end
+                    displayText = #names > 0 and table.concat(names, ", ") or (opt.NoneText or "None")
+                end
+            else
+                displayText = value ~= nil and tostring(value) or (opt.NoneText or "None")
+            end
+            valueLabel.Text = fitText()
+            local hasValue = #options > 0 and ((isMulti and #value > 0) or (not isMulti and value ~= nil))
+            ah(valueLabel, { TextColor3 = hasValue and z.Text or z.Muted }, animated and 0.15 or 0)
+            for _, row in ipairs(rows) do
+                if row.Index then
+                    paintSelected(row, animated)
                 end
             end
         end
-        local bP = nil
-        local function bQ()
-            local bR = a2:_popupHost(aX)
-            local bS = a2.Scale.Scale
-            if bP then
-                local bT = ba.AbsolutePosition + ba.AbsoluteSize / 2
-                if not az(bT, bP) then
+
+        local function makeRow()
+            local rowFrame = ai("TextButton", {
+                Size = UDim2.new(1, -6, 0, itemH),
+                BackgroundColor3 = z.Surface3,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Text = "",
+                AutoButtonColor = false,
+                Visible = false,
+                Parent = list,
+            })
+            aj(rowFrame, UDim.new(0, 7))
+            local row = { Frame = rowFrame, Tweens = {}, Hover = false }
+            if isMulti then
+                row.Box = ai("Frame", {
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    Position = UDim2.new(0, 8, 0.5, 0),
+                    Size = UDim2.fromOffset(18, 18),
+                    BackgroundColor3 = z.Surface2,
+                    BorderSizePixel = 0,
+                    Parent = rowFrame,
+                })
+                aj(row.Box, UDim.new(0, 5))
+                row.BoxStroke = ak(row.Box, z.Stroke)
+                row.Check = ai("ImageLabel", {
+                    AnchorPoint = Vector2.new(0.5, 0.5),
+                    Position = UDim2.fromScale(0.5, 0.5),
+                    Size = UDim2.fromOffset(12, 12),
+                    BackgroundTransparency = 1,
+                    ImageColor3 = z.AccentDark,
+                    ImageTransparency = 1,
+                    ScaleType = Enum.ScaleType.Fit,
+                    Parent = row.Box,
+                })
+            else
+                row.Bar = ai("Frame", {
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    Position = UDim2.new(0, 3, 0.5, 0),
+                    Size = UDim2.fromOffset(3, 4),
+                    BackgroundColor3 = z.Accent,
+                    BackgroundTransparency = 1,
+                    BorderSizePixel = 0,
+                    Parent = rowFrame,
+                })
+                aj(row.Bar, UDim.new(1, 0))
+                row.Check = ai("ImageLabel", {
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    Position = UDim2.new(1, -10, 0.5, 0),
+                    Size = UDim2.fromOffset(14, 14),
+                    BackgroundTransparency = 1,
+                    ImageColor3 = z.Accent,
+                    ImageTransparency = 1,
+                    ScaleType = Enum.ScaleType.Fit,
+                    Parent = rowFrame,
+                })
+            end
+            aq(row.Check, "check")
+            row.CheckScale = ai("UIScale", { Parent = row.Check })
+            row.Label = am({
+                Position = UDim2.fromOffset(isMulti and 36 or 14, 0),
+                Size = UDim2.new(1, isMulti and -44 or -46, 1, 0),
+                Text = "",
+                TextSize = 13,
+                TextColor3 = z.Muted,
+                RichText = true,
+                Parent = rowFrame,
+            })
+            local canClick = ay(rowFrame, function()
+                return list
+            end)
+            rowFrame.MouseEnter:Connect(function()
+                if ax() or not row.Index then
+                    return
+                end
+                setActive(row.Index, "mouse", false)
+            end)
+            rowFrame.MouseLeave:Connect(function()
+                if activeSource == "mouse" and row.Index and active == row.Index then
+                    setActive(nil, "mouse", false)
+                end
+            end)
+            rowFrame.MouseButton1Click:Connect(function()
+                if not canClick() or not row.Index then
+                    return
+                end
+                toggleOption(row.Option)
+            end)
+            rows[#rows + 1] = row
+            return row
+        end
+        local function bindRow(row, index, option)
+            for _, tween in ipairs(row.Tweens) do
+                tween:Cancel()
+            end
+            table.clear(row.Tweens)
+            row.Index, row.Option = index, option
+            row.Hover = active == index
+            row.On = nil
+            row.Frame.Position = UDim2.fromOffset(0, (index - 1) * STEP)
+            row.Label.Text = labelFor(option)
+            row.Frame.Visible = true
+            paintSelected(row, false)
+        end
+        local function renderRows(force)
+            if not by.Open then
+                return
+            end
+            local total = #filtered
+            local top = list.CanvasPosition.Y
+            local first = math.max(1, math.floor(top / STEP) + 1 - BUFFER)
+            local last = math.min(total, math.ceil((top + listH) / STEP) + BUFFER)
+            if not force and first == firstShown and last == lastShown then
+                return
+            end
+            firstShown, lastShown = first, last
+            table.clear(rowAt)
+            local free = {}
+            for _, row in ipairs(rows) do
+                local index = row.Index
+                if index and index >= first and index <= last then
+                    rowAt[index] = row
+                else
+                    row.Index = nil
+                    row.Frame.Visible = false
+                    free[#free + 1] = row
+                end
+            end
+            for index = first, last do
+                if not rowAt[index] then
+                    local row = table.remove(free) or makeRow()
+                    bindRow(row, index, filtered[index])
+                    rowAt[index] = row
+                end
+            end
+        end
+        local function invalidateRows()
+            for _, row in ipairs(rows) do
+                row.Index = nil
+                row.Frame.Visible = false
+            end
+            table.clear(rowAt)
+            firstShown, lastShown = nil, nil
+        end
+        list:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+            renderRows(false)
+        end)
+        local function scrollToIndex(index)
+            local top = (index - 1) * STEP
+            local bottom = top + itemH
+            local current = list.CanvasPosition.Y
+            local target = current
+            if top < current then
+                target = top
+            elseif bottom > current + listH then
+                target = bottom - listH
+            end
+            if target ~= current then
+                list.CanvasPosition = Vector2.new(0, math.clamp(target, 0, math.max(0, canvasH - listH)))
+            end
+            renderRows(false)
+        end
+        local function scrollToSelected()
+            local target = 0
+            if not isMulti then
+                local value = getValue()
+                if value ~= nil then
+                    for index, option in ipairs(filtered) do
+                        if option == value then
+                            target = math.max(0, (index - 2) * STEP)
+                            break
+                        end
+                    end
+                end
+            end
+            list.CanvasPosition = Vector2.new(0, math.clamp(target, 0, math.max(0, canvasH - listH)))
+        end
+        setActive = function(index, source, scroll)
+            activeSource = source
+            if active == index then
+                return
+            end
+            local previous = active
+            active = index
+            local previousRow = previous and rowAt[previous]
+            if previousRow then
+                previousRow.Hover = false
+                paintHover(previousRow, 0.15)
+            end
+            local currentRow = index and rowAt[index]
+            if currentRow then
+                currentRow.Hover = true
+                paintHover(currentRow, 0.15)
+            end
+            if scroll and index then
+                scrollToIndex(index)
+            end
+        end
+
+        local function layoutPopup(instant)
+            searchVisible = opt.Searchable ~= false and #options > (opt.SearchAfter or 0)
+            searchBar.Visible = searchVisible
+            local topH = 0
+            if searchVisible then
+                topH += 38
+            end
+            toolbar.Position = UDim2.fromOffset(0, topH)
+            if isMulti and #options > 0 then
+                toolbar.Visible = true
+                topH += 34
+            else
+                toolbar.Visible = false
+            end
+            local count = #filtered
+            emptyLabel.Visible = count == 0
+            local shown = math.clamp(count, 1, maxRows)
+            local height = shown * itemH + (shown - 1) * 2
+            canvasH = math.max(count, 1) * STEP - 2
+            list.CanvasSize = UDim2.fromOffset(0, canvasH)
+            local scale = window.Scale.Scale
+            local host = window:_popupHost(frame)
+            local hostHeight = host.AbsoluteSize.Y / scale
+            local chipY = (chip.AbsolutePosition.Y - host.AbsolutePosition.Y) / scale
+            local room = math.max(hostHeight - (chipY + chip.AbsoluteSize.Y / scale) - 14, chipY - 14) - topH - 16
+            if room >= itemH then
+                height = math.min(height, room)
+            end
+            listH = height
+            list.Position = UDim2.fromOffset(0, topH)
+            list.Size = UDim2.new(1, 0, 0, height)
+            local width = math.max(math.floor(chip.AbsoluteSize.X / scale), opt.PopupWidth or 210)
+            width = math.min(width, math.max(host.AbsoluteSize.X / scale - 16, 120))
+            popupSize = Vector2.new(width, topH + height + 16)
+            padded.Size = UDim2.new(1, 0, 0, popupSize.Y)
+            if not popupReady then
+                return
+            end
+            if instant then
+                popup.Size = UDim2.fromOffset(popupSize.X, popupSize.Y)
+            else
+                ah(popup, { Size = UDim2.fromOffset(popupSize.X, popupSize.Y) }, 0.22, Enum.EasingStyle.Quint)
+            end
+        end
+        local function alignPopup()
+            local host = window:_popupHost(frame)
+            local scale = window.Scale.Scale
+            if parentScroller then
+                local center = chip.AbsolutePosition + chip.AbsoluteSize / 2
+                if not az(center, parentScroller) then
                     by:SetOpen(false)
                     return
                 end
             end
-            local bT = bR.AbsoluteSize / bS
-            local bU = (ba.AbsolutePosition - bR.AbsolutePosition) / bS
-            local bV = ba.AbsoluteSize / bS
-            local bW = math.clamp(bU.X + bV.X, bL.X + 8, math.max(bT.X - 8, bL.X + 8))
-            local bX = bU.Y + bV.Y + 6
-            if bX + bL.Y > bT.Y - 8 and bU.Y - 6 - bL.Y >= 8 then
-                bi.AnchorPoint = Vector2.new(1, 1)
-                bi.Position = UDim2.fromOffset(bW, bU.Y - 6)
-                bm.AnchorPoint = Vector2.new(0, 1)
-                bm.Position = UDim2.fromScale(0, 1)
+            local hostSize = host.AbsoluteSize / scale
+            local chipPos = (chip.AbsolutePosition - host.AbsolutePosition) / scale
+            local chipSize = chip.AbsoluteSize / scale
+            local x = math.clamp(chipPos.X + chipSize.X, popupSize.X + 8, math.max(hostSize.X - 8, popupSize.X + 8))
+            local y = chipPos.Y + chipSize.Y + 6
+            if y + popupSize.Y > hostSize.Y - 8 and chipPos.Y - 6 - popupSize.Y >= 8 then
+                popup.AnchorPoint = Vector2.new(1, 1)
+                popup.Position = UDim2.fromOffset(x, chipPos.Y - 6)
+                content.AnchorPoint = Vector2.new(0, 1)
+                content.Position = UDim2.fromScale(0, 1)
             else
-                bi.AnchorPoint = Vector2.new(1, 0)
-                bi.Position = UDim2.fromOffset(bW, bX)
-                bm.AnchorPoint = Vector2.zero
-                bm.Position = UDim2.fromScale(0, 0)
+                popup.AnchorPoint = Vector2.new(1, 0)
+                popup.Position = UDim2.fromOffset(x, y)
+                content.AnchorPoint = Vector2.zero
+                content.Position = UDim2.fromScale(0, 0)
             end
         end
-        local bR = nil
-        local bS = 0
-        local bT = nil
-        local function bU()
-            if bT then
-                bT.ScrollingEnabled = true
-                bT = nil
+        local function unlockScroll()
+            if lockedScroller then
+                lockedScroller.ScrollingEnabled = true
+                lockedScroller = nil
             end
         end
-        local function bV()
-            bw.CanvasPosition = Vector2.zero
-            if aV then
-                return
-            end
-            local bW = bF()
-            if bW == nil then
-                return
-            end
-            for bX, bY in ipairs(aW) do
-                if bY == bW then
-                    bw.CanvasPosition = Vector2.new(0, math.max(0, (bX - 2) * (a3 + 2)))
+
+        local function commit()
+            refreshDisplay(true)
+            aJ(opt.Callback, getValue())
+        end
+        toggleOption = function(option)
+            if selected[option] then
+                if not isMulti and opt.AllowNone == false then
+                    setOpen(false)
                     return
                 end
+                selected[option] = nil
+            else
+                if isMulti then
+                    local limit = tonumber(opt.MaxSelected)
+                    if limit and #getValue() >= limit then
+                        ah(popupStroke, { Color = z.Warning }, 0.08)
+                        task.delay(0.3, function()
+                            ah(popupStroke, { Color = z.Stroke }, 0.3)
+                        end)
+                        return
+                    end
+                else
+                    selected = {}
+                end
+                selected[option] = true
+            end
+            commit()
+            if not isMulti and opt.CloseOnSelect ~= false then
+                setOpen(false)
             end
         end
-        local function bW(bX)
-            if bX == by.Open then
+        setOpen = function(state)
+            if state == by.Open then
                 return
             end
-            by.Open = bX
-            bd:Set(bX)
-            ah(bb, { Color = bX and z.Accent or z.Stroke, Transparency = bX and 0.35 or 0 }, 0.2)
-            ah(ba, { BackgroundColor3 = bX and z.Surface2 or z.Surface }, 0.2)
-            bS += 1
-            if bX then
-                if a2._closePopup and a2._closePopup ~= by._close then
-                    a2._closePopup()
+            by.Open = state
+            arrow:Set(state)
+            ah(chipStroke, { Color = state and z.Accent or z.Stroke, Transparency = state and 0.35 or 0 }, 0.2)
+            ah(chip, { BackgroundColor3 = state and z.Surface2 or z.Surface }, 0.2)
+            openToken += 1
+            if state then
+                if window._closePopup and window._closePopup ~= by._close then
+                    window._closePopup()
                 end
-                a2._closePopup = by._close
-                bP = aX:FindFirstAncestorWhichIsA("ScrollingFrame")
-                if bP and bP.ScrollingEnabled then
-                    bT = bP
-                    bP.ScrollingEnabled = false
+                window._closePopup = by._close
+                parentScroller = frame:FindFirstAncestorWhichIsA("ScrollingFrame")
+                if parentScroller and parentScroller.ScrollingEnabled then
+                    lockedScroller = parentScroller
+                    parentScroller.ScrollingEnabled = false
                 end
-                bi.Parent = a2:_popupHost(aX)
-                bB = ""
-                br.Text = ""
-                br.PlaceholderText = aU.SearchPlaceholder or (#aW > 6 and ("Search " .. #aW .. " options") or "Search")
-                bO()
-                bN(true)
-                bI(false)
-                bV()
-                bM = true
-                bi.Size = UDim2.fromOffset(bL.X, 0)
-                bQ()
-                bi.Visible = true
-                ah(bi, { Size = UDim2.fromOffset(bL.X, bL.Y) }, 0.3, Enum.EasingStyle.Quint)
-                ah(bl, { Transparency = 0 }, 0.12)
-                ah(bj, { ImageTransparency = 0.4 }, 0.3)
-                if not bR then
-                    bR = a2:_listen("Render", bQ)
+                popup.Parent = window:_popupHost(frame)
+                query, tokens = "", {}
+                searchBox.Text = ""
+                searchBox.PlaceholderText = opt.SearchPlaceholder or (#options > 6 and ("Search " .. #options .. " options") or "Search")
+                active, activeSource = nil, nil
+                rebuildFiltered()
+                invalidateRows()
+                layoutPopup(true)
+                refreshDisplay(false)
+                scrollToSelected()
+                popupReady = true
+                popup.Size = UDim2.fromOffset(popupSize.X, 0)
+                alignPopup()
+                popup.Visible = true
+                renderRows(true)
+                ah(popup, { Size = UDim2.fromOffset(popupSize.X, popupSize.Y) }, 0.3, Enum.EasingStyle.Quint)
+                ah(popupStroke, { Transparency = 0 }, 0.12)
+                ah(shadow, { ImageTransparency = 0.4 }, 0.3)
+                if not renderConn then
+                    renderConn = window:_listen("Render", alignPopup)
+                end
+                if searchVisible and not E and opt.AutoFocus ~= false then
+                    local token = openToken
+                    task.defer(function()
+                        if by.Open and openToken == token then
+                            pcall(function()
+                                searchBox:CaptureFocus()
+                            end)
+                        end
+                    end)
                 end
             else
-                if a2._closePopup == by._close then
-                    a2._closePopup = nil
+                if window._closePopup == by._close then
+                    window._closePopup = nil
                 end
-                bU()
-                if br:IsFocused() then
-                    br:ReleaseFocus()
+                unlockScroll()
+                if searchBox:IsFocused() then
+                    searchBox:ReleaseFocus()
                 end
-                bM = false
-                ah(bi, { Size = UDim2.fromOffset(bL.X, 0) }, 0.2, Enum.EasingStyle.Quint)
-                ah(bj, { ImageTransparency = 1 }, 0.16)
-                local bY = bS
+                popupReady = false
+                active, activeSource = nil, nil
+                ah(popup, { Size = UDim2.fromOffset(popupSize.X, 0) }, 0.2, Enum.EasingStyle.Quint)
+                ah(shadow, { ImageTransparency = 1 }, 0.16)
+                local token = openToken
                 task.delay(0.14, function()
-                    if bS == bY and not by.Open then
-                        ah(bl, { Transparency = 1 }, 0.06)
+                    if token == openToken and not by.Open then
+                        ah(popupStroke, { Transparency = 1 }, 0.06)
                     end
                 end)
                 task.delay(0.21, function()
-                    if bS == bY and not by.Open then
-                        bi.Visible = false
-                        if bR then
-                            bR()
-                            bR = nil
+                    if token == openToken and not by.Open then
+                        popup.Visible = false
+                        if renderConn then
+                            renderConn()
+                            renderConn = nil
                         end
                     end
                 end)
             end
         end
         by._close = function()
-            bW(false)
+            setOpen(false)
         end
-        local function bX()
-            bI(true)
-            aJ(aU.Callback, bF())
-        end
-        local function bY()
-            local bZ = {}
-            for b_, b0 in ipairs(aW) do
-                bZ[b0] = b_
-            end
-            for b_, b0 in pairs(bA) do
-                if not bZ[b_] then
-                    b0.Frame:Destroy()
-                    bA[b_] = nil
+
+        local function firstSelectedIndex()
+            for index, option in ipairs(filtered) do
+                if selected[option] then
+                    return index
                 end
             end
-            for b_, b0 in ipairs(aW) do
-                local b1 = bA[b0]
-                if b1 then
-                    b1.Frame.LayoutOrder = b_
-                    continue
-                end
-                local b2 = ai(
-                    "TextButton",
-                    {
-                        Size = UDim2.new(1, -6, 0, a3),
-                        BackgroundColor3 = z.Surface3,
-                        BackgroundTransparency = 1,
-                        BorderSizePixel = 0,
-                        Text = "",
-                        AutoButtonColor = false,
-                        LayoutOrder = b_,
-                        Parent = bw,
-                    }
-                )
-                aj(b2, UDim.new(0, 7))
-                local b3, b4, b5, b6
-                if aV then
-                    b3 = ai(
-                        "Frame",
-                        {
-                            AnchorPoint = Vector2.new(0, 0.5),
-                            Position = UDim2.new(0, 8, 0.5, 0),
-                            Size = UDim2.fromOffset(18, 18),
-                            BackgroundColor3 = z.Surface2,
-                            BorderSizePixel = 0,
-                            Parent = b2,
-                        }
-                    )
-                    aj(b3, UDim.new(0, 5))
-                    b4 = ak(b3, z.Stroke)
-                    b6 = ai(
-                        "ImageLabel",
-                        {
-                            AnchorPoint = Vector2.new(0.5, 0.5),
-                            Position = UDim2.fromScale(0.5, 0.5),
-                            Size = UDim2.fromOffset(12, 12),
-                            BackgroundTransparency = 1,
-                            ImageColor3 = z.AccentDark,
-                            ImageTransparency = 1,
-                            ScaleType = Enum.ScaleType.Fit,
-                            Parent = b3,
-                        }
-                    )
+            return nil
+        end
+        local function move(delta)
+            local total = #filtered
+            if total == 0 then
+                return
+            end
+            local target
+            if active == nil then
+                target = firstSelectedIndex() or (delta > 0 and 1 or total)
+            else
+                target = active + delta
+                if math.abs(delta) == 1 then
+                    if target < 1 then
+                        target = total
+                    elseif target > total then
+                        target = 1
+                    end
                 else
-                    b5 = ai(
-                        "Frame",
-                        {
-                            AnchorPoint = Vector2.new(0, 0.5),
-                            Position = UDim2.new(0, 3, 0.5, 0),
-                            Size = UDim2.fromOffset(3, 4),
-                            BackgroundColor3 = z.Accent,
-                            BackgroundTransparency = 1,
-                            BorderSizePixel = 0,
-                            Parent = b2,
-                        }
-                    )
-                    aj(b5, UDim.new(1, 0))
-                    b6 = ai(
-                        "ImageLabel",
-                        {
-                            AnchorPoint = Vector2.new(1, 0.5),
-                            Position = UDim2.new(1, -10, 0.5, 0),
-                            Size = UDim2.fromOffset(14, 14),
-                            BackgroundTransparency = 1,
-                            ImageColor3 = z.Accent,
-                            ImageTransparency = 1,
-                            ScaleType = Enum.ScaleType.Fit,
-                            Parent = b2,
-                        }
-                    )
+                    target = math.clamp(target, 1, total)
                 end
-                aq(b6, "check")
-                local b7 = ai("UIScale", { Parent = b6 })
-                local b8 = am({
-                    Position = UDim2.fromOffset(aV and 36 or 14, 0),
-                    Size = UDim2.new(1, aV and -44 or -46, 1, 0),
-                    Text = bE(b0),
-                    TextSize = 13,
-                    TextColor3 = z.Muted,
-                    RichText = true,
-                    Parent = b2,
-                })
-                local b9 = {
-                    Option = b0,
-                    Frame = b2,
-                    Box = b3,
-                    BoxStroke = b4,
-                    Bar = b5,
-                    Check = b6,
-                    CheckScale = b7,
-                    Label = b8,
-                    On = nil,
-                    Hover = false,
-                }
-                local ca = ay(b2, function()
-                    return bw
-                end)
-                b2.MouseEnter:Connect(function()
-                    if ax() then
-                        return
-                    end
-                    b9.Hover = true
-                    bG(b9, 0.15)
-                    if b4 and not bz[b0] then
-                        ah(b4, { Color = z.StrokeHover }, 0.15)
-                    end
-                end)
-                b2.MouseLeave:Connect(function()
-                    b9.Hover = false
-                    bG(b9, 0.25)
-                    if b4 and not bz[b0] then
-                        ah(b4, { Color = z.Stroke }, 0.25)
-                    end
-                end)
-                b2.MouseButton1Click:Connect(function()
-                    if not ca() then
-                        return
-                    end
-                    if bz[b0] then
-                        if not aV and aU.AllowNone == false then
-                            bW(false)
-                            return
-                        end
-                        bz[b0] = nil
-                    else
-                        if not aV then
-                            bz = {}
-                        end
-                        bz[b0] = true
-                    end
-                    bX()
-                    if not aV then
-                        bW(false)
-                    end
-                end)
-                bA[b0] = b9
-                bH(b9, false)
             end
-            bO()
-            if by.Open then
-                bN(false)
+            setActive(target, "key", true)
+        end
+        local function jumpTo(index)
+            if #filtered > 0 then
+                setActive(index, "key", true)
             end
         end
-        bu.MouseButton1Click:Connect(function()
-            for bZ, b_ in ipairs(aW) do
-                if bC(b_) then
-                    bz[b_] = true
+        local function activate()
+            local now = os.clock()
+            if now - lastActivate < 0.12 then
+                return
+            end
+            lastActivate = now
+            if active and filtered[active] ~= nil then
+                toggleOption(filtered[active])
+            end
+        end
+        local pageStep = math.max(1, maxRows - 1)
+
+        local function applySelection(values)
+            selected = {}
+            for _, value in ipairs(values) do
+                selected[value] = true
+            end
+        end
+        selectAllButton.MouseButton1Click:Connect(function()
+            local limit = tonumber(opt.MaxSelected)
+            local count = limit and #getValue() or 0
+            for _, option in ipairs(filtered) do
+                if not selected[option] then
+                    if limit and count >= limit then
+                        break
+                    end
+                    selected[option] = true
+                    count += 1
                 end
             end
-            bX()
+            commit()
         end)
-        bv.MouseButton1Click:Connect(function()
-            bz = {}
-            bX()
+        clearAllButton.MouseButton1Click:Connect(function()
+            selected = {}
+            commit()
         end)
-        function by:Set(bZ, b_)
-            bz = {}
-            if aV then
-                for b0, b1 in ipairs(type(bZ) == "table" and bZ or { bZ }) do
-                    bz[b1] = true
-                end
-            elseif bZ ~= nil then
-                bz[bZ] = true
+        searchBox.FocusLost:Connect(function(enterPressed)
+            ah(searchStroke, { Color = z.Stroke }, 0.2)
+            ah(searchIconImage, { ImageColor3 = z.Muted }, 0.2)
+            if enterPressed and by.Open then
+                activate()
             end
-            bI(by.Open)
-            aF(aY)
-            if not b_ then
-                aJ(aU.Callback, bF())
+        end)
+        searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+            if searchBox.Text == query then
+                return
+            end
+            query = searchBox.Text
+            tokens = tokenize(query)
+            if not by.Open then
+                return
+            end
+            rebuildFiltered()
+            active = nil
+            list.CanvasPosition = Vector2.zero
+            invalidateRows()
+            layoutPopup(false)
+            renderRows(true)
+            if #tokens > 0 and #filtered > 0 then
+                setActive(1, "key", false)
+            end
+        end)
+
+        function by:Set(value, silent)
+            selected = {}
+            if isMulti then
+                applySelection(type(value) == "table" and value or { value })
+            elseif value ~= nil then
+                selected[value] = true
+            end
+            refreshDisplay(by.Open)
+            aF(frameStroke)
+            if not silent then
+                aJ(opt.Callback, getValue())
             end
         end
         function by:Get()
-            return bF()
+            return getValue()
         end
-        local function bZ(b_, b0)
-            if type(b_) ~= "table" or type(b0) ~= "table" then
-                return b_ == b0
+        function by:GetOptions()
+            return table.clone(options)
+        end
+        local function sameValue(x, y)
+            if type(x) ~= "table" or type(y) ~= "table" then
+                return x == y
             end
-            if #b_ ~= #b0 then
+            if #x ~= #y then
                 return false
             end
-            for b1, b2 in ipairs(b_) do
-                if b0[b1] ~= b2 then
+            for index, item in ipairs(x) do
+                if y[index] ~= item then
                     return false
                 end
             end
             return true
         end
-        function by:Refresh(b_, b0, b1)
-            local b2 = bF()
-            aW = b_ or {}
-            if not b0 then
-                bz = {}
+        function by:Refresh(newOptions, keepSelection, silent)
+            local before = getValue()
+            setOptions(newOptions)
+            if not keepSelection then
+                selected = {}
             end
-            bY()
-            bI(false)
-            if not b1 and not bZ(b2, bF()) then
-                aJ(aU.Callback, bF())
+            rebuildFiltered()
+            active = nil
+            invalidateRows()
+            refreshDisplay(false)
+            if by.Open then
+                layoutPopup(false)
+                renderRows(true)
+            end
+            if not silent and not sameValue(before, getValue()) then
+                aJ(opt.Callback, getValue())
             end
         end
         function by:_saveValue()
-            local b_ = bF()
-            if aV then
-                local b0 = {}
-                for b1, b2 in ipairs(b_) do
-                    b0[b2] = true
+            local value = getValue()
+            if isMulti then
+                local seen = {}
+                for _, option in ipairs(value) do
+                    seen[option] = true
                 end
-                for b1 in pairs(bz) do
-                    if not b0[b1] then
-                        table.insert(b_, b1)
+                for option in pairs(selected) do
+                    if not seen[option] then
+                        table.insert(value, option)
                     end
                 end
-                return b_
+                return value
             end
-            if b_ == nil then
-                b_ = next(bz)
+            if value == nil then
+                value = next(selected)
             end
-            return b_
+            return value
         end
-        function by:SetOpen(b_)
-            bW(b_ == true)
+        function by:SetOpen(state)
+            setOpen(state == true)
         end
-        local b_ = ay(a7, function()
-            return aX:FindFirstAncestorWhichIsA("ScrollingFrame")
+
+        local canToggle = ay(button, function()
+            return frame:FindFirstAncestorWhichIsA("ScrollingFrame")
         end)
-        a7.MouseButton1Click:Connect(function()
-            if b_() then
-                bW(not by.Open)
+        button.MouseButton1Click:Connect(function()
+            if canToggle() then
+                setOpen(not by.Open)
             end
         end)
-        a7.MouseEnter:Connect(function()
+        button.MouseEnter:Connect(function()
             if not by.Open and not ax() then
-                ah(bb, { Color = z.StrokeHover }, 0.15)
-                ah(ba, { BackgroundColor3 = z.Surface2 }, 0.15)
+                ah(chipStroke, { Color = z.StrokeHover }, 0.15)
+                ah(chip, { BackgroundColor3 = z.Surface2 }, 0.15)
             end
         end)
-        a7.MouseLeave:Connect(function()
+        button.MouseLeave:Connect(function()
             if not by.Open then
-                ah(bb, { Color = z.Stroke }, 0.25)
-                ah(ba, { BackgroundColor3 = z.Surface }, 0.25)
-            end
-        end)
-        br:GetPropertyChangedSignal("Text"):Connect(function()
-            bB = string.lower(br.Text)
-            bO()
-            if by.Open then
-                bN(false)
+                ah(chipStroke, { Color = z.Stroke }, 0.25)
+                ah(chip, { BackgroundColor3 = z.Surface }, 0.25)
             end
         end)
         by._listeners = {
             function()
-                bW(false)
-                bU()
-                if bR then
-                    bR()
-                    bR = nil
+                setOpen(false)
+                unlockScroll()
+                if renderConn then
+                    renderConn()
+                    renderConn = nil
                 end
-                bi:Destroy()
+                popup:Destroy()
             end,
         }
-        a2:_listen("Began", function(b0)
+        window:_listen("Began", function(input)
             if not by.Open then
                 return
             end
-            if b0.KeyCode == Enum.KeyCode.Escape then
-                bW(false)
-            elseif aw(b0) then
-                local b1 = av()
-                if not az(b1, bi) and not az(b1, a7) then
-                    bW(false)
+            local code = input.KeyCode
+            if code == Enum.KeyCode.Escape then
+                setOpen(false)
+                return
+            end
+            if aw(input) then
+                local pointer = av()
+                if not az(pointer, popup) and not az(pointer, button) then
+                    setOpen(false)
                 end
+                return
+            end
+            if input.UserInputType ~= Enum.UserInputType.Keyboard then
+                return
+            end
+            local typing = searchBox:IsFocused()
+            if code == Enum.KeyCode.Down then
+                move(1)
+            elseif code == Enum.KeyCode.Up then
+                move(-1)
+            elseif code == Enum.KeyCode.PageDown then
+                move(pageStep)
+            elseif code == Enum.KeyCode.PageUp then
+                move(-pageStep)
+            elseif not typing and code == Enum.KeyCode.Home then
+                jumpTo(1)
+            elseif not typing and code == Enum.KeyCode.End then
+                jumpTo(#filtered)
+            elseif not typing and (code == Enum.KeyCode.Return or code == Enum.KeyCode.KeypadEnter or code == Enum.KeyCode.Space) then
+                activate()
             end
         end, by)
-        bY()
-        bI(false)
-        task.defer(bh, true)
-        return m(self, aU, by, aX, "Dropdown")
+        refreshDisplay(false)
+        task.defer(resizeChip, true)
+        return m(self, opt, by, frame, "Dropdown")
     end
     k._amountSuffixes = { k = 1e3, m = 1e6, b = 1e9, t = 1e12, qa = 1e15, qi = 1e18 }
     function k._parseAmount(aU)
@@ -6596,7 +6910,7 @@ end
         self.ToggleButton = bb
         self._toggleStroke = bc
         self._toggleIcon = bd
-        self:SetToggleButtonIcon(a7.Icon or "fingerprint-pattern")
+        self:SetToggleButtonIcon(a7.Icon or "dot")
         local bf, bg = false, false
         local bh = Vector2.zero
         bb.InputBegan:Connect(function(bi)
