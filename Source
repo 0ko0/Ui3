@@ -1518,73 +1518,244 @@ local a = (function()
             end,
         }, aU, "Paragraph")
     end
+    k._btnSpec = {
+        chip = {
+            Default = {
+                { "Surface3", 0.45, "Stroke", 0 },
+                { "Surface3", 0.2, "StrokeHover", 0 },
+                { "Surface3", 0.05, "StrokeHover", 0 },
+                text = "Text",
+                icon = "Accent",
+                arrow = "Muted",
+                desc = "Muted",
+            },
+            Primary = {
+                { "Accent", 0.12, "Accent", 0.4 },
+                { "Accent", 0, "Accent", 0 },
+                { "Accent", 0.08, "Accent", 0.2 },
+                text = "AccentDark",
+                icon = "AccentDark",
+                arrow = "AccentDark",
+                desc = "AccentDark",
+                descT = 0.3,
+            },
+            Danger = {
+                { "Error", 0.88, "Error", 0.6 },
+                { "Error", 0.78, "Error", 0.25 },
+                { "Error", 0.68, "Error", 0.1 },
+                text = "Error",
+                icon = "Error",
+                arrow = "Error",
+                desc = "Muted",
+            },
+        },
+    }
+    k._btnSpec.card = {
+        Default = {
+            { "Surface2", 0, "Stroke", 0 },
+            { "Surface2", 0, "StrokeHover", 0 },
+            { "Surface3", 0.3, "StrokeHover", 0 },
+            text = "Text",
+            icon = "Accent",
+            arrow = "Muted",
+            desc = "Muted",
+        },
+        Primary = k._btnSpec.chip.Primary,
+        Danger = k._btnSpec.chip.Danger,
+    }
+    function k._btnNorm(v)
+        v = type(v) == "string" and v:lower() or ""
+        if v == "primary" then
+            return "Primary"
+        end
+        if v == "danger" or v == "destructive" then
+            return "Danger"
+        end
+        return "Default"
+    end
+    
+    function k._btnFx(c)
+        local hit, bg, stroke, opts = c.hit, c.bg, c.stroke, c.opts
+        local spec = k._btnSpec[c.kind or "chip"]
+        local texts, descs, icons, arrows = c.texts or {}, c.descs or {}, c.icons or {}, c.arrows or {}
+        local state = {
+            style = k._btnNorm(opts.Style or (opts.Danger and "Danger") or (opts.Primary and "Primary")),
+            hover = false,
+            press = false,
+            disabled = opts.Disabled == true,
+            loading = false,
+        }
+        local fx = {}
+        local function paint(dur)
+            local sp = spec[state.style] or spec.Default
+            local locked = state.disabled or state.loading
+            local idx = 1
+            if not locked then
+                idx = state.press and 3 or (state.hover and 2 or 1)
+            end
+            local lv = sp[idx]
+            local function fade(t)
+                return locked and (1 - (1 - t) * 0.5) or t
+            end
+            ah(bg, { BackgroundColor3 = z[lv[1]], BackgroundTransparency = fade(lv[2]) }, dur)
+            if stroke and not stroke:GetAttribute("Hidden") then
+                ah(stroke, { Color = z[lv[3]], Transparency = fade(lv[4]) }, dur)
+            end
+            local tx = locked and 0.55 or 0
+            for _, t in ipairs(texts) do
+                ah(t, { TextColor3 = z[sp.text], TextTransparency = tx }, dur)
+            end
+            for _, t in ipairs(descs) do
+                ah(t, { TextColor3 = z[sp.desc], TextTransparency = locked and 0.7 or (sp.descT or 0) }, dur)
+            end
+            local function tint(list, key)
+                for _, im in ipairs(list) do
+                    ar(im, z[key], not locked, dur)
+                    if not im:GetAttribute("CustomIcon") then
+                        ah(im, { ImageTransparency = tx }, dur)
+                    end
+                end
+            end
+            tint(icons, sp.icon)
+            tint(arrows, sp.arrow)
+        end
+        local canClick = c.scroller and ay(hit, c.scroller) or function()
+            return true
+        end
+        local last = 0
+        local cooldown = tonumber(opts.Cooldown) or 0
+        local function run()
+            if state.disabled or state.loading then
+                return
+            end
+            if cooldown > 0 then
+                local now = os.clock()
+                if now - last < cooldown then
+                    return
+                end
+                last = now
+            end
+            if opts.Lock then
+                state.loading = true
+                paint(0.12)
+                task.spawn(function()
+                    aJ(opts.Callback)
+                    state.loading = false
+                    if hit.Parent then
+                        paint(0.2)
+                    end
+                end)
+            else
+                aJ(opts.Callback)
+            end
+        end
+        hit.MouseEnter:Connect(function()
+            if ax() then
+                return
+            end
+            state.hover = true
+            paint(0.12)
+        end)
+        hit.MouseLeave:Connect(function()
+            state.hover, state.press = false, false
+            paint(0.25)
+        end)
+        hit.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                state.press = true
+                paint(0.06)
+            end
+        end)
+        hit.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 and state.press then
+                state.press = false
+                paint(0.12)
+            end
+        end)
+        hit.MouseButton1Click:Connect(function()
+            if state.disabled or state.loading or not canClick() then
+                return
+            end
+            aE(c.ripple or bg)
+            run()
+        end)
+        function fx:SetStyle(s)
+            state.style = k._btnNorm(s)
+            paint(0.15)
+        end
+        function fx:SetDisabled(v)
+            state.disabled = v == true
+            if state.disabled then
+                state.hover, state.press = false, false
+            end
+            paint(0.15)
+        end
+        function fx:IsDisabled()
+            return state.disabled
+        end
+        function fx:SetCallback(f)
+            opts.Callback = f
+        end
+        function fx:Fire()
+            run()
+        end
+        paint(0)
+        return fx
+    end
     local function aT(aU, aV)
-        local aW = aV.Style == "Primary"
         local aX = E and 34 or 28
         local aY = aX + 6 + (aV.Desc and 16 or 0)
         local aZ = aO(aU, "TextButton", aY, aV)
-        local a_ = ai(
-            "Frame",
-            {
-                Position = UDim2.fromOffset(14, 3),
-                Size = UDim2.new(1, -28, 0, aX),
-                BackgroundColor3 = aW and z.Accent or z.Surface3,
-                BackgroundTransparency = aW and 0.12 or 0.45,
-                BorderSizePixel = 0,
-                ClipsDescendants = true,
-                Parent = aZ,
-            }
-        )
+        local a_ = ai("Frame", {
+            Position = UDim2.fromOffset(14, 3),
+            Size = UDim2.new(1, -28, 0, aX),
+            BackgroundColor3 = z.Surface3,
+            BackgroundTransparency = 0.45,
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+            Parent = aZ,
+        })
         aj(a_, UDim.new(0, 6))
-        local a0 = ak(a_, aW and z.Accent or z.Stroke, aW and 0.4 or 0)
-        local a1 = ai(
-            "Frame",
-            {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.new(0, 0, 1, 0),
-                AutomaticSize = Enum.AutomaticSize.X,
-                BackgroundTransparency = 1,
-                Parent = a_,
-            }
-        )
-        ai(
-            "UIListLayout",
-            {
-                FillDirection = Enum.FillDirection.Horizontal,
-                VerticalAlignment = Enum.VerticalAlignment.Center,
-                SortOrder = Enum.SortOrder.LayoutOrder,
-                Padding = UDim.new(0, 6),
-                Parent = a1,
-            }
-        )
-        local a2 = aW and z.AccentDark or z.Text
+        local a0 = ak(a_)
+        local a1 = ai("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.new(0, 0, 1, 0),
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundTransparency = 1,
+            Parent = a_,
+        })
+        ai("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 6),
+            Parent = a1,
+        })
+        local icons = {}
         if aV.Icon then
-            local a3 = ai(
-                "ImageLabel",
-                {
-                    Size = UDim2.fromOffset(14, 14),
-                    BackgroundTransparency = 1,
-                    ImageColor3 = aW and z.AccentDark or z.Accent,
-                    ScaleType = Enum.ScaleType.Fit,
-                    LayoutOrder = 1,
-                    Parent = a1,
-                }
-            )
-            aq(a3, aV.Icon)
+            local img = ai("ImageLabel", {
+                Size = UDim2.fromOffset(14, 14),
+                BackgroundTransparency = 1,
+                ScaleType = Enum.ScaleType.Fit,
+                LayoutOrder = 1,
+                Parent = a1,
+            })
+            aq(img, aV.Icon)
+            icons[1] = img
         end
-        local a3 = am({
+        local title = am({
             Size = UDim2.new(0, 0, 1, 0),
             AutomaticSize = Enum.AutomaticSize.X,
             Text = aV.Name or "Button",
             TextSize = 13,
-            TextColor3 = a2,
             TextTruncate = Enum.TextTruncate.None,
             LayoutOrder = 2,
             Parent = a1,
         })
+        local desc
         if aV.Desc then
-            am({
+            desc = am({
                 Position = UDim2.fromOffset(14, aX + 6),
                 Size = UDim2.new(1, -28, 0, 14),
                 Text = aV.Desc,
@@ -1594,82 +1765,85 @@ local a = (function()
                 Parent = aZ,
             })
         end
-        local a4 = aW and 0.12 or 0.45
-        aZ.MouseEnter:Connect(function()
-            ah(a_, { BackgroundTransparency = aW and 0 or 0.2 }, 0.12)
-            ah(a0, aW and { Transparency = 0 } or { Color = z.StrokeHover }, 0.12)
-        end)
-        aZ.MouseLeave:Connect(function()
-            ah(a_, { BackgroundTransparency = a4 }, 0.25)
-            ah(a0, aW and { Transparency = 0.4 } or { Color = z.Stroke }, 0.25)
-        end)
-        aZ.MouseButton1Click:Connect(function()
-            aE(a_)
-            aJ(aV.Callback)
-        end)
-        return m(aU, aV, {
-            SetText = function(a5, a6)
-                a3.Text = a6
+        local fx = k._btnFx({
+            kind = "chip",
+            hit = aZ,
+            bg = a_,
+            stroke = a0,
+            opts = aV,
+            ripple = a_,
+            texts = { title },
+            icons = icons,
+            scroller = function()
+                return aZ:FindFirstAncestorWhichIsA("ScrollingFrame")
             end,
-        }, aZ, "Button")
+        })
+        local api = {
+            SetText = function(_, t)
+                title.Text = tostring(t)
+            end,
+            SetDesc = function(_, t)
+                if desc then
+                    desc.Text = tostring(t)
+                end
+            end,
+        }
+        for name, fn in pairs(fx) do
+            api[name] = fn
+        end
+        return m(aU, aV, api, aZ, "Button")
     end
     function aS:Button(aU)
         aU = l(aU, { Title = "Name", Description = "Desc" })
         if aM(self).Compact then
             return aT(self, aU)
         end
-        local aV = aU.Style == "Primary"
-        local aW = aU.Desc and J or I
-        local aX, aY = aO(self, "TextButton", aW, aU)
+        local aX, aY = aO(self, "TextButton", aU.Desc and J or I, aU)
         aX.ClipsDescendants = true
-        if aV then
-            ah(aX, { BackgroundColor3 = z.Accent, BackgroundTransparency = 0.12 }, 0)
-            ah(aY, { Color = z.Accent }, 0)
-            aY.Transparency = 0.4
-            aX.MouseEnter:Connect(function()
-                ah(aX, { BackgroundTransparency = 0 }, 0.12)
-                ah(aY, { Transparency = 0 }, 0.12)
-            end)
-            aX.MouseLeave:Connect(function()
-                ah(aX, { BackgroundTransparency = 0.12 }, 0.25)
-                ah(aY, { Transparency = 0.4 }, 0.25)
-            end)
-        else
-            aG(aX, aY)
-        end
-        local aZ = aV and z.AccentDark or z.Text
-        local a_ = 0
+        local pad, icons = 0, {}
         if aU.Icon then
-            aB(aX, aU.Icon, aV and z.AccentDark or z.Accent, UDim2.new(0, 14, 0.5, 0))
-            a_ = 26
+            local _, img = aB(aX, aU.Icon, z.Accent, UDim2.new(0, 14, 0.5, 0))
+            icons[1] = img
+            pad = 26
         end
-        local a0 = aP(aX, aU.Name or "Button", aU.Desc, 30)
-        if a_ > 0 then
-            for a1, a2 in ipairs(aX:GetChildren()) do
-                if a2:IsA("TextLabel") then
-                    a2.Position = a2.Position + UDim2.fromOffset(a_, 0)
-                    a2.Size = a2.Size - UDim2.fromOffset(a_, 0)
-                end
+        local title, desc = aP(aX, aU.Name or "Button", aU.Desc, 30)
+        if pad > 0 then
+            for _, lbl in ipairs({ title, desc }) do
+                lbl.Position = lbl.Position + UDim2.fromOffset(pad, 0)
+                lbl.Size = lbl.Size - UDim2.fromOffset(pad, 0)
             end
         end
-        if aV then
-            for a1, a2 in ipairs(aX:GetChildren()) do
-                if a2:IsA("TextLabel") then
-                    ah(a2, { TextColor3 = aZ }, 0)
-                end
-            end
-        end
-        aB(aX, x, aV and z.AccentDark or z.Muted, UDim2.new(1, -30, 0.5, 0))
-        aX.MouseButton1Click:Connect(function()
-            aE(aX)
-            aJ(aU.Callback)
-        end)
-        return m(self, aU, {
-            SetText = function(a1, a2)
-                a0.Text = a2
+        local _, arrow = aB(aX, x, z.Muted, UDim2.new(1, -30, 0.5, 0))
+        local fx = k._btnFx({
+            kind = "card",
+            hit = aX,
+            bg = aX,
+            stroke = aY,
+            opts = aU,
+            texts = { title },
+            descs = desc and { desc } or {},
+            icons = icons,
+            arrows = { arrow },
+            scroller = function()
+                return aX:FindFirstAncestorWhichIsA("ScrollingFrame")
             end,
-        }, aX, "Button")
+        })
+        local api = {
+            SetText = function(_, t)
+                title.Text = tostring(t)
+            end,
+            SetDesc = function(_, t)
+                if desc then
+                    desc.Text = tostring(t)
+                end
+            end,
+        }
+        for name, fn in pairs(fx) do
+            api[name] = fn
+        end
+        return m(self, aU, api, aX, "Button")
     end
+
     function aS:Toggle(aU)
         local aV, aW
         aU, aV, aW = aQ(
@@ -9149,65 +9323,125 @@ end
     aS.AddLeftGroupbox = bK("Left")
     aS.AddRightGroupbox = bK("Right")
     function aS:ButtonRow(bL)
-        local bM = type(bL) == "table" and (bL.Buttons or bL) or {}
-        local bN = aM(self).Compact
-        local bO = E and 34 or 30
-        local bP = aO(self, "Frame", bO + (bN and 4 or 14), {})
-        local bQ = bN and 14 or 7
-        local bR = ai(
-            "Frame",
-            {
-                Position = UDim2.fromOffset(bQ, bN and 2 or 7),
-                Size = UDim2.new(1, -bQ * 2, 0, bO),
-                BackgroundTransparency = 1,
-                Parent = bP,
-            }
-        )
-        local bS = math.max(#bM, 1)
-        local bT = { Buttons = {} }
-        local bU = {}
-        for bV, bW in ipairs(bM) do
-            if type(bW) == "string" then
-                bW = { Name = bW }
+        local raw = type(bL) == "table" and (bL.Buttons or bL) or {}
+        local compact = aM(self).Compact
+        local h = E and 34 or 30
+        local gap = (type(bL) == "table" and tonumber(bL.Gap)) or 6
+        local holder = aO(self, "Frame", h + (compact and 4 or 14), {})
+        local inset = compact and 14 or 7
+        local area = ai("Frame", {
+            Position = UDim2.fromOffset(inset, compact and 2 or 7),
+            Size = UDim2.new(1, -inset * 2, 0, h),
+            BackgroundTransparency = 1,
+            Parent = holder,
+        })
+        local items, names, total = {}, {}, 0
+        for _, v in ipairs(raw) do
+            if type(v) == "string" then
+                v = { Name = v }
             end
-            local bX = bW.Name or bW.Title or "Button"
-            table.insert(bU, bX)
-            local bY, bZ = bF(
-                bR,
-                bX,
-                { Position = UDim2.new((bV - 1) / bS, (bV - 1) * 6 / bS, 0, 0), Size = UDim2.new(
-                    1 / bS,
-                    -6 * (bS - 1) / bS,
-                    1,
-                    0
-                ) },
-                function()
-                    aJ(bW.Callback)
+            if type(v) == "table" then
+                local w = math.max(tonumber(v.Weight) or 1, 0.1)
+                table.insert(items, { opt = v, w = w })
+                total += w
+            end
+        end
+        local n = #items
+        local api = { Buttons = {} }
+        local used = 0
+        for i, it in ipairs(items) do
+            local opt = it.opt
+            local name = tostring(opt.Name or opt.Title or "Button")
+            table.insert(names, name)
+            local btn = ai("TextButton", {
+                Position = UDim2.new(used / total, (i - 1) * gap - used / total * (n - 1) * gap, 0, 0),
+                Size = UDim2.new(it.w / total, -(n - 1) * gap * it.w / total, 1, 0),
+                BackgroundColor3 = z.Surface3,
+                BackgroundTransparency = 0.45,
+                BorderSizePixel = 0,
+                Text = "",
+                AutoButtonColor = false,
+                ClipsDescendants = true,
+                Parent = area,
+            })
+            aj(btn, UDim.new(0, 6))
+            local stroke = ak(btn)
+            local icons, pad = {}, 6
+            if opt.Icon then
+                local _, img = aB(btn, opt.Icon, z.Accent, UDim2.new(0, 10, 0.5, 0))
+                icons[1] = img
+                pad = 28
+            end
+            local label = am({
+                Position = UDim2.fromOffset(pad, 0),
+                Size = UDim2.new(1, -pad * 2, 1, 0),
+                Text = name,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Center,
+                Parent = btn,
+            })
+            local fx = k._btnFx({
+                kind = "chip",
+                hit = btn,
+                bg = btn,
+                stroke = stroke,
+                opts = opt,
+                texts = { label },
+                icons = icons,
+                scroller = function()
+                    return btn:FindFirstAncestorWhichIsA("ScrollingFrame")
+                end,
+            })
+            api.Buttons[i] = { Button = btn, Label = label, Fx = fx }
+            used += it.w
+        end
+        function api:SetText(i, text)
+            local b = api.Buttons[i]
+            if b then
+                b.Label.Text = tostring(text)
+            end
+        end
+        function api:SetStyle(i, style)
+            local b = api.Buttons[i]
+            if b then
+                b.Fx:SetStyle(style)
+            end
+        end
+        function api:SetCallback(i, fn)
+            local b = api.Buttons[i]
+            if b then
+                b.Fx:SetCallback(fn)
+            end
+        end
+        function api:SetDisabled(i, v)
+            if type(i) == "boolean" then
+                for _, b in ipairs(api.Buttons) do
+                    b.Fx:SetDisabled(i)
                 end
-            )
-            bZ.TextSize = 13
-            if bW.Style == "Primary" then
-                ah(bY, { BackgroundColor3 = z.Accent, BackgroundTransparency = 0.12 }, 0)
-                ah(bZ, { TextColor3 = z.AccentDark }, 0)
-            elseif bW.Style == "Danger" then
-                ah(bZ, { TextColor3 = z.Error }, 0)
+                return
             end
-            bT.Buttons[bV] = { Button = bY, Label = bZ }
-        end
-        function bT:SetText(bV, bW)
-            local bX = bT.Buttons[bV]
-            if bX then
-                bX.Label.Text = tostring(bW)
+            local b = api.Buttons[i]
+            if b then
+                b.Fx:SetDisabled(v)
             end
         end
-        return m(
-            self,
-            { Name = table.concat(bU, " "), Visible = not (type(bL) == "table" and bL.Visible == false) },
-            bT,
-            bP,
-            "ButtonRow"
-        )
+        function api:IsDisabled(i)
+            local b = api.Buttons[i]
+            return b ~= nil and b.Fx:IsDisabled()
+        end
+        function api:Fire(i)
+            local b = api.Buttons[i]
+            if b then
+                b.Fx:Fire()
+            end
+        end
+        return m(self, {
+            Name = table.concat(names, " "),
+            Visible = not (type(bL) == "table" and bL.Visible == false),
+            Tooltip = type(bL) == "table" and bL.Tooltip or nil,
+        }, api, holder, "ButtonRow")
     end
+
     local function bL(bM, bN, bO, bP)
         local bQ = E and 34 or 30
         local bR = aO(bM, "Frame", bQ + 4, {})
