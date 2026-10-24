@@ -671,7 +671,7 @@ local a = (function()
     local E = b.TouchEnabled and not b.MouseEnabled
     k.Touch = E
     local F = 188
-    local G = 62
+    local G = 72
     local H = 34
     local I = E and 54 or 48
     local J = E and 70 or 64
@@ -5490,13 +5490,13 @@ local a = (function()
                 Name = "LogoPlate",
                 AnchorPoint = Vector2.new(0, 0.5),
                 Position = UDim2.new(0, 12, 0.5, 0),
-                Size = UDim2.fromOffset(48, 48),
+                Size = UDim2.fromOffset(54, 54),
                 BackgroundColor3 = z.Surface3,
                 BorderSizePixel = 0,
                 Parent = bk,
             }
         )
-        aj(hdrPlate, UDim.new(0, 10))
+        aj(hdrPlate, UDim.new(0, 14))
         ak(hdrPlate, z.StrokeHover, 0.55)
         ai(
             "UIGradient",
@@ -5510,8 +5510,8 @@ local a = (function()
             "ImageLabel",
             {
                 AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.new(0, 36, 0.5, 0),
-                Size = UDim2.fromOffset(38, 38),
+                Position = UDim2.new(0, 39, 0.5, 0),
+                Size = UDim2.fromOffset(42, 42),
                 BackgroundTransparency = 1,
                 Image = "",
                 ImageColor3 = Color3.fromRGB(255, 255, 254),
@@ -5523,8 +5523,8 @@ local a = (function()
         aq(bl, a4.Icon or A.Logo, true)
         local bm = a4.Version or a4.Subtitle
         am({
-            Position = UDim2.new(0, 70, 0.5, bm and -15 or -9),
-            Size = UDim2.new(1, -82, 0, 18),
+            Position = UDim2.new(0, 76, 0.5, bm and -15 or -9),
+            Size = UDim2.new(1, -88, 0, 18),
             Text = a7.Title,
             TextSize = 14,
             FontFace = D.Bold,
@@ -5532,8 +5532,8 @@ local a = (function()
         })
         if bm then
             am({
-                Position = UDim2.new(0, 70, 0.5, 3),
-                Size = UDim2.new(1, -82, 0, 14),
+                Position = UDim2.new(0, 76, 0.5, 3),
+                Size = UDim2.new(1, -88, 0, 14),
                 Text = tostring(bm),
                 TextSize = 11,
                 FontFace = D.Regular,
@@ -6625,7 +6625,7 @@ local a = (function()
         local a9 = self.Gui
         local ba = a7.LoadingSteps or { "Preparing interface", "Loading icons", "Almost there" }
         local bb, bc, bd = 340, 22, 24
-        local be = 92
+        local be = 106
         local bf = be + #ba * bd + 18
         local bg = ai(
             "CanvasGroup",
@@ -6661,8 +6661,8 @@ local a = (function()
         local bl = ai("CanvasGroup", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Parent = bg })
         local logoGlow = ai("ImageLabel", {
             AnchorPoint = Vector2.new(0.5, 0.5),
-            Position = UDim2.fromOffset(bc + 23, bc + 22),
-            Size = UDim2.fromOffset(104, 104),
+            Position = UDim2.fromOffset(bc + 30, bc + 29),
+            Size = UDim2.fromOffset(140, 140),
             BackgroundTransparency = 1,
             Image = A.Glow,
             ImageColor3 = z.Accent,
@@ -6671,7 +6671,7 @@ local a = (function()
         })
         local bm = ai("ImageLabel", {
             Position = UDim2.fromOffset(bc, bc - 1),
-            Size = UDim2.fromOffset(46, 46),
+            Size = UDim2.fromOffset(60, 60),
             BackgroundTransparency = 1,
             ImageColor3 = z.Accent,
             ImageTransparency = 1,
@@ -6679,9 +6679,9 @@ local a = (function()
             Parent = bl,
         })
         aq(bm, a7.Icon or A.Logo, true)
-        local bn = bc + 58
+        local bn = bc + 72
         local bo = am({
-            Position = UDim2.fromOffset(bn, bc + 4),
+            Position = UDim2.fromOffset(bn, bc + 11),
             Size = UDim2.new(1, -(bn + 70), 0, 18),
             Text = a7.LoadingTitle or a7.Title or "Airflow",
             TextSize = 15,
@@ -6689,7 +6689,7 @@ local a = (function()
             Parent = bl,
         })
         local bp = am({
-            Position = UDim2.fromOffset(bn, bc + 23),
+            Position = UDim2.fromOffset(bn, bc + 30),
             Size = UDim2.new(1, -(bn + 70), 0, 15),
             Text = a7.LoadingText or a7.Subtitle or "Loading",
             TextSize = 12,
@@ -6699,7 +6699,7 @@ local a = (function()
         })
         local bq = am({
             AnchorPoint = Vector2.new(1, 0),
-            Position = UDim2.new(1, -bc, 0, bc + 12),
+            Position = UDim2.new(1, -bc, 0, bc + 19),
             Size = UDim2.fromOffset(56, 16),
             Text = "0%",
             TextSize = 13,
@@ -7412,7 +7412,7 @@ end
             {
                 AnchorPoint = Vector2.new(0.5, 0),
                 Position = UDim2.new(0.5, 0, 0, 14),
-                Size = UDim2.fromOffset(0, 40),
+                Size = UDim2.fromOffset(0, 48),
                 AutomaticSize = Enum.AutomaticSize.X,
                 BackgroundColor3 = z.Background,
                 BorderSizePixel = 0,
@@ -7430,7 +7430,7 @@ end
             {
                 AnchorPoint = Vector2.new(0, 0.5),
                 Position = UDim2.new(0, 0, 0.5, 0),
-                Size = UDim2.fromOffset(26, 26),
+                Size = UDim2.fromOffset(34, 34),
                 BackgroundTransparency = 1,
                 ImageColor3 = z.Accent,
                 ScaleType = Enum.ScaleType.Fit,
@@ -7440,7 +7440,7 @@ end
         )
         aq(ba, a7.Icon or A.Logo, true)
         am({
-            Position = UDim2.fromOffset(34, 0),
+            Position = UDim2.fromOffset(42, 0),
             Size = UDim2.new(0, 0, 1, 0),
             AutomaticSize = Enum.AutomaticSize.X,
             Text = a7.Title or "Airflow",
@@ -18894,7 +18894,7 @@ end
         self._weatherSpeed = math.clamp(tonumber(b7) or 1, 0.1, 3)
     end
     local b7 =
-        { Top = 8, Width = E and 176 or 168, Height = E and 36 or 32, Wide = 340, Radius = 34, Bars = 4, Pinned = 6 }
+        { Top = 8, Width = E and 208 or 198, Height = E and 46 or 42, Wide = 340, Radius = 34, Bars = 4, Pinned = 6 }
     local function b8(b9, ca, cb, cc)
         if b9._ghost then
             b9._ghost:Destroy()
@@ -18994,7 +18994,7 @@ end
             {
                 AnchorPoint = Vector2.new(0, 0.5),
                 Position = UDim2.new(0, 5, 0.5, 0),
-                Size = UDim2.fromOffset(b7.Height - 6, b7.Height - 6),
+                Size = UDim2.fromOffset(b7.Height - 8, b7.Height - 8),
                 BackgroundColor3 = z.Accent,
                 BackgroundTransparency = 0.82,
                 BorderSizePixel = 0,
@@ -19007,7 +19007,7 @@ end
             {
                 AnchorPoint = Vector2.new(0.5, 0.5),
                 Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.fromOffset(20, 20),
+                Size = UDim2.fromOffset(b7.Height - 16, b7.Height - 16),
                 BackgroundTransparency = 1,
                 ImageColor3 = z.Accent,
                 ScaleType = Enum.ScaleType.Fit,
