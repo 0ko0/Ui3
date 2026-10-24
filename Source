@@ -510,7 +510,7 @@ local a = (function()
     }
     k.ThemeName = "Noir"
     k.Assets =
-        { Shadow = "rbxassetid://6014261993", Glow = "rbxassetid://8992230677", Logo = "rbxassetid://103859712365480" }
+        { Shadow = "rbxassetid://6014261993", Glow = "rbxassetid://8992230677", Logo = "rbxassetid://121362463954810" }
     local q = [[https://raw.githubusercontent.com/Footagesus/Icons/refs/heads/main/lucide/dist/Icons.lua]]
     local r = nil
     local function s()
@@ -967,6 +967,7 @@ local a = (function()
         ar.ImageRectSize = aw or Vector2.zero
         if as == A.Logo then
             ay = true
+            ah(ar, { ImageColor3 = Color3.fromRGB(255, 255, 254) }, 0)
         end
         local az = ax and not ay
         ar:SetAttribute("CustomIcon", az or nil)
@@ -5339,6 +5340,7 @@ local a = (function()
         )
         aj(bj, UDim.new(0, 10))
         a7.SidebarFill = bj
+        ai("UIGradient", { Rotation = 90, Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(205, 205, 205)), Parent = bj })
         ai(
             "Frame",
             {
@@ -5354,24 +5356,91 @@ local a = (function()
         )
         local bk =
             ai("Frame", { Name = "Header", Size = UDim2.new(1, 0, 0, G), BackgroundTransparency = 1, Parent = bi })
+        local hdrGlow = ai(
+            "Frame",
+            {
+                Name = "HeaderGlow",
+                Size = UDim2.fromScale(1, 1),
+                BackgroundColor3 = z.Accent,
+                BackgroundTransparency = 0.92,
+                BorderSizePixel = 0,
+                Parent = bk,
+            }
+        )
+        aj(hdrGlow, UDim.new(0, 10))
+        ai(
+            "UIGradient",
+            {
+                Rotation = 90,
+                Transparency = NumberSequence.new({
+                    NumberSequenceKeypoint.new(0, 0),
+                    NumberSequenceKeypoint.new(1, 1),
+                }),
+                Parent = hdrGlow,
+            }
+        )
+        ai(
+            "Frame",
+            {
+                Name = "HeaderLine",
+                AnchorPoint = Vector2.new(0.5, 1),
+                Position = UDim2.new(0.5, 0, 1, 0),
+                Size = UDim2.new(1, -24, 0, 1),
+                BackgroundColor3 = z.Stroke,
+                BorderSizePixel = 0,
+                Parent = bk,
+            },
+            {
+                ai("UIGradient", {
+                    Transparency = NumberSequence.new({
+                        NumberSequenceKeypoint.new(0, 1),
+                        NumberSequenceKeypoint.new(0.5, 0),
+                        NumberSequenceKeypoint.new(1, 1),
+                    }),
+                }),
+            }
+        )
+        local hdrPlate = ai(
+            "Frame",
+            {
+                Name = "LogoPlate",
+                AnchorPoint = Vector2.new(0, 0.5),
+                Position = UDim2.new(0, 12, 0.5, 0),
+                Size = UDim2.fromOffset(38, 38),
+                BackgroundColor3 = z.Surface3,
+                BorderSizePixel = 0,
+                Parent = bk,
+            }
+        )
+        aj(hdrPlate, UDim.new(0, 10))
+        ak(hdrPlate, z.StrokeHover, 0.55)
+        ai(
+            "UIGradient",
+            {
+                Rotation = 45,
+                Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(150, 150, 150)),
+                Parent = hdrPlate,
+            }
+        )
         local bl = ai(
             "ImageLabel",
             {
-                AnchorPoint = Vector2.new(0, 0.5),
-                Position = UDim2.new(0, 14, 0.5, 0),
-                Size = UDim2.fromOffset(32, 32),
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0, 31, 0.5, 0),
+                Size = UDim2.fromOffset(26, 26),
                 BackgroundTransparency = 1,
                 Image = "",
-                ImageColor3 = z.Accent,
+                ImageColor3 = Color3.fromRGB(255, 255, 254),
                 ScaleType = Enum.ScaleType.Fit,
+                ZIndex = 2,
                 Parent = bk,
             }
         )
         aq(bl, a4.Icon or A.Logo, true)
         local bm = a4.Version or a4.Subtitle
         am({
-            Position = UDim2.new(0, 56, 0.5, bm and -15 or -9),
-            Size = UDim2.new(1, -68, 0, 18),
+            Position = UDim2.new(0, 60, 0.5, bm and -15 or -9),
+            Size = UDim2.new(1, -72, 0, 18),
             Text = a7.Title,
             TextSize = 14,
             FontFace = D.Bold,
@@ -5379,8 +5448,8 @@ local a = (function()
         })
         if bm then
             am({
-                Position = UDim2.new(0, 56, 0.5, 3),
-                Size = UDim2.new(1, -68, 0, 14),
+                Position = UDim2.new(0, 60, 0.5, 3),
+                Size = UDim2.new(1, -72, 0, 14),
                 Text = tostring(bm),
                 TextSize = 11,
                 FontFace = D.Regular,
@@ -9011,13 +9080,33 @@ end
                 Parent = bQ,
             }
         )
-        local bS = 14
+        local bGrad = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(200, 200, 200))
+        ai("UIGradient", { Color = bGrad, Parent = bQ })
+        ai("UIGradient", { Color = bGrad, Parent = bR })
+        aj(
+            ai(
+                "Frame",
+                {
+                    Name = "AccentBar",
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    Position = UDim2.new(0, 0, 0.5, 0),
+                    Size = UDim2.fromOffset(3, 16),
+                    BackgroundColor3 = z.Accent,
+                    BackgroundTransparency = 0.45,
+                    BorderSizePixel = 0,
+                    ZIndex = 3,
+                    Parent = bQ,
+                }
+            ),
+            UDim.new(1, 0)
+        )
+        local bS = 20
         if bK.Icon then
             local bT = ai(
                 "ImageLabel",
                 {
                     AnchorPoint = Vector2.new(0, 0.5),
-                    Position = UDim2.new(0, 14, 0.5, 0),
+                    Position = UDim2.new(0, 20, 0.5, 0),
                     Size = UDim2.fromOffset(14, 14),
                     BackgroundTransparency = 1,
                     ImageColor3 = z.Accent,
@@ -9027,7 +9116,7 @@ end
                 }
             )
             aq(bT, bK.Icon)
-            bS = 37
+            bS = 43
         end
         local bT = ai(
             "ImageLabel",
@@ -9192,6 +9281,19 @@ end
             ah(bT, { ImageColor3 = b5 and z.Text or z.Muted }, b6)
             if bW and not E then
                 ah(bW, { ImageTransparency = b5 and 0 or 0.45 }, b6)
+            end
+            local gbBar = bQ:FindFirstChild("AccentBar")
+            if gbBar then
+                ah(
+                    gbBar,
+                    { Size = UDim2.fromOffset(3, b5 and 24 or 16), BackgroundTransparency = b5 and 0 or 0.45 },
+                    b6,
+                    Enum.EasingStyle.Quint
+                )
+            end
+            local gbStroke = bP:FindFirstChildOfClass("UIStroke")
+            if gbStroke then
+                ah(gbStroke, { Color = b5 and z.StrokeHover or z.Stroke, Transparency = b5 and 0.4 or 0 }, b6)
             end
         end
         bQ.MouseEnter:Connect(function()
@@ -12503,7 +12605,27 @@ end
             }
         )
         aj(bZ, UDim.new(0, 8))
-        ak(bZ, z.Stroke)
+        ak(bZ, z.StrokeHover, 0.5)
+        ai(
+            "UIGradient",
+            { Rotation = 90, Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(170, 170, 170)), Parent = bZ }
+        )
+        aj(
+            ai(
+                "Frame",
+                {
+                    Name = "Underline",
+                    AnchorPoint = Vector2.new(0.5, 1),
+                    Position = UDim2.new(0.5, 0, 1, -3),
+                    Size = UDim2.fromOffset(18, 2),
+                    BackgroundColor3 = z.Accent,
+                    BorderSizePixel = 0,
+                    ZIndex = 2,
+                    Parent = bZ,
+                }
+            ),
+            UDim.new(1, 0)
+        )
         local b_ = ai(
             "Frame",
             { Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X, BackgroundTransparency = 1, ZIndex = 2, Parent = bY }
@@ -12628,6 +12750,8 @@ end
                 Parent = bY.Row,
             }
         )
+        ah(b1, { BackgroundColor3 = z.Surface3 }, 0)
+        aj(b1, UDim.new(0, 8))
         al(b1, 14, 14)
         ai(
             "UIListLayout",
@@ -12671,11 +12795,19 @@ end
         b1.MouseEnter:Connect(function()
             if self.CurrentSubTab ~= b_ then
                 ah(b_._label, { TextColor3 = z.Text }, 0.12)
+                ah(b1, { BackgroundTransparency = 0.8 }, 0.15)
+                if b_._iconImage then
+                    ar(b_._iconImage, z.Text, false, 0.12)
+                end
             end
         end)
         b1.MouseLeave:Connect(function()
             if self.CurrentSubTab ~= b_ then
                 ah(b_._label, { TextColor3 = z.Muted }, 0.2)
+                ah(b1, { BackgroundTransparency = 1 }, 0.2)
+                if b_._iconImage then
+                    ar(b_._iconImage, z.Muted, false, 0.2)
+                end
             end
         end)
         b1.MouseButton1Click:Connect(function()
@@ -12721,6 +12853,7 @@ end
             end
         end
         ah(bW._label, { TextColor3 = z.Text }, b0)
+        ah(bW._button, { BackgroundTransparency = 1 }, b0)
         if bW._iconImage then
             ar(bW._iconImage, z.Accent, true, b0)
         end
