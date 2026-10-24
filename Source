@@ -511,6 +511,13 @@ local a = (function()
     k.ThemeName = "Noir"
     k.Assets =
         { Shadow = "rbxassetid://6014261993", Glow = "rbxassetid://8992230677", Logo = "rbxassetid://121362463954810" }
+    k.LogoSources = {
+        "rbxassetid://121362463954810",
+        "rbxthumb://type=Asset&id=121362463954810&w=420&h=420",
+        "rbxassetid://137903409768963",
+        "rbxthumb://type=Asset&id=137903409768963&w=420&h=420",
+    }
+    k._logoLabels = setmetatable({}, { __mode = "k" })
     local q = [[https://raw.githubusercontent.com/Footagesus/Icons/refs/heads/main/lucide/dist/Icons.lua]]
     local r = nil
     local function s()
@@ -619,6 +626,9 @@ local a = (function()
         return nil
     end
     local function w(x)
+        if x == k.Assets.Logo and k._logoUrl ~= nil then
+            x = k._logoUrl or "wind"
+        end
         if typeof(x) == "table" then
             return v(x.Image) or x.Image, x.RectOffset, x.RectSize, true, x.Tint == true
         end
@@ -967,6 +977,7 @@ local a = (function()
         ar.ImageRectSize = aw or Vector2.zero
         if as == A.Logo then
             ay = true
+            k._logoLabels[ar] = true
             ah(ar, { ImageColor3 = Color3.fromRGB(255, 255, 254) }, 0)
         end
         local az = ax and not ay
@@ -982,6 +993,78 @@ local a = (function()
         elseif aB then
             aB:Destroy()
         end
+    end
+    local function logoApply()
+        local img, off, size = w(k.Assets.Logo)
+        if not img then
+            return
+        end
+        for lbl in pairs(k._logoLabels) do
+            if lbl.Parent then
+                lbl.Image = img
+                lbl.ImageRectOffset = off or Vector2.zero
+                lbl.ImageRectSize = size or Vector2.zero
+            end
+        end
+    end
+    function k._resolveLogo(host)
+        if k._logoState then
+            return k._logoState
+        end
+        local state = { Done = false }
+        k._logoState = state
+        task.spawn(function()
+            local t0 = os.clock()
+            while host and not host.Parent and os.clock() - t0 < 3 do
+                task.wait(0.05)
+            end
+            local okCP, cp = pcall(function()
+                return game:GetService("ContentProvider")
+            end)
+            local probe = ai("ImageLabel", {
+                Name = "LogoProbe",
+                Position = UDim2.fromOffset(-8, -8),
+                Size = UDim2.fromOffset(2, 2),
+                BackgroundTransparency = 1,
+                ImageTransparency = 0.98,
+                Parent = host,
+            })
+            local weak
+            for _, src in ipairs(k.LogoSources) do
+                probe.Image = src
+                local status
+                if okCP then
+                    pcall(function()
+                        cp:PreloadAsync({ probe }, function(_, st)
+                            status = st
+                        end)
+                    end)
+                end
+                if status ~= Enum.AssetFetchStatus.Failure and status ~= Enum.AssetFetchStatus.TimedOut then
+                    local t1 = os.clock()
+                    while not probe.IsLoaded and os.clock() - t1 < 1.5 do
+                        task.wait(0.05)
+                    end
+                    if probe.IsLoaded then
+                        k._logoUrl = src
+                        break
+                    end
+                    if status == Enum.AssetFetchStatus.Success then
+                        weak = weak or src
+                    end
+                end
+            end
+            if k._logoUrl == nil then
+                k._logoUrl = weak or false
+                if not weak then
+                    warn("[AirFlow] logo could not be loaded, using fallback icon")
+                end
+            end
+            probe:Destroy()
+            state.Done = true
+            logoApply()
+        end)
+        return state
     end
     local function ar(as, at, au, av)
         if as:GetAttribute("CustomIcon") then
@@ -5254,6 +5337,7 @@ local a = (function()
             }
         )
         a7.Gui = bc
+        k._resolveLogo(bc)
         local bd = ai(
             "Frame",
             {
@@ -6575,19 +6659,27 @@ local a = (function()
             }
         )
         local bl = ai("CanvasGroup", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Parent = bg })
-        local bm = ai(
-            "ImageLabel",
-            {
-                Position = UDim2.fromOffset(bc, bc),
-                Size = UDim2.fromOffset(30, 30),
-                BackgroundTransparency = 1,
-                ImageColor3 = z.Accent,
-                ScaleType = Enum.ScaleType.Fit,
-                Parent = bl,
-            }
-        )
+        local logoGlow = ai("ImageLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromOffset(bc + 17, bc + 16),
+            Size = UDim2.fromOffset(76, 76),
+            BackgroundTransparency = 1,
+            Image = A.Glow,
+            ImageColor3 = z.Accent,
+            ImageTransparency = 1,
+            Parent = bl,
+        })
+        local bm = ai("ImageLabel", {
+            Position = UDim2.fromOffset(bc, bc - 1),
+            Size = UDim2.fromOffset(34, 34),
+            BackgroundTransparency = 1,
+            ImageColor3 = z.Accent,
+            ImageTransparency = 1,
+            ScaleType = Enum.ScaleType.Fit,
+            Parent = bl,
+        })
         aq(bm, a7.Icon or A.Logo, true)
-        local bn = bc + 42
+        local bn = bc + 46
         local bo = am({
             Position = UDim2.fromOffset(bn, bc - 2),
             Size = UDim2.new(1, -(bn + 70), 0, 18),
@@ -6737,12 +6829,25 @@ local a = (function()
         ah(bj, { Scale = 1 }, 0.45, Enum.EasingStyle.Quint)
         ah(bk, { ImageTransparency = 0.55 }, 0.4)
         ah(bu, { Size = UDim2.fromScale(0.85, 1) }, a8 * 0.8, Enum.EasingStyle.Quart)
+        local clock0 = os.clock()
+        task.spawn(function()
+            task.wait(0.15)
+            local t1 = os.clock()
+            while bg.Parent and not bm.IsLoaded and os.clock() - t1 < 3 do
+                task.wait(0.05)
+            end
+            if bg.Parent then
+                ah(bm, { ImageTransparency = 0 }, 0.45)
+            end
+        end)
         local bv
         bv = d.RenderStepped:Connect(function(bw)
             if not bg.Parent then
                 bv:Disconnect()
                 return
             end
+            local lt = os.clock() - clock0
+            logoGlow.ImageTransparency = 1 - math.clamp((lt - 0.25) / 0.5, 0, 1) * (0.25 + 0.2 * (math.sin(lt * 3) + 1) / 2)
             bq.Text = math.floor(bu.Size.X.Scale * 100 + 0.5) .. "%"
             for bx, by in ipairs(br) do
                 if by.State == "active" then
@@ -7113,6 +7218,18 @@ local a = (function()
             end)
         end
         task.delay(a8, function()
+            local logoState = k._logoState
+            if logoState and not logoState.Done then
+                ah(bu, { Size = UDim2.fromScale(0.97, 1) }, 3, Enum.EasingStyle.Linear)
+                local waited = 0
+                while bg.Parent and not logoState.Done and waited < 3 do
+                    task.wait(0.05)
+                    waited += 0.05
+                end
+                if not bg.Parent then
+                    return
+                end
+            end
             ah(bu, { Size = UDim2.fromScale(1, 1) }, 0.25, Enum.EasingStyle.Quint)
             task.delay(0.25, function()
                 if not bg.Parent then
