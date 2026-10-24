@@ -5292,6 +5292,24 @@ local a = (function()
         a7.ConfigName = a8.FileName
         a7._configListeners = {}
         a7._pendingFlags = {}
+        a7.StrictLoad = a8.StrictLoad == true
+        do
+            local savedSettings = a7:_readConfigSettings()
+            local wantAutoSave = a8.AutoSave == true
+            if type(savedSettings.AutoSave) == "boolean" then
+                wantAutoSave = savedSettings.AutoSave
+            end
+            if wantAutoSave then
+                a7:SetAutoSave(true, a8.AutoSaveInterval)
+            end
+        end
+        if a8.AutoLoad == true then
+            task.defer(function()
+                if not a7._destroyed then
+                    a7:LoadAutoload()
+                end
+            end)
+        end
         local a9 = a4.DefaultTheme or a4.Theme
         if a9 ~= nil then
             k.DefaultTheme = a9
@@ -7929,7 +7947,7 @@ end
         end
         return bj
     end
-    function a2:_applyFlags(bi, bj)
+    function a2:_applyFlags(bi, bj, strict)
         bj = bj == true
         self._pendingFlags = {}
         for bk, bl in pairs(bi) do
@@ -7940,6 +7958,13 @@ end
                 end
             elseif type(bl) == "table" then
                 self._pendingFlags[bk] = { Entry = bl, Silent = bj }
+            end
+        end
+        if strict then
+            for flag, control in pairs(k.Flags) do
+                if bi[flag] == nil and control._defaultEntry and type(control.Set) == "function" then
+                    pcall(bf, control, control._defaultEntry, bj)
+                end
             end
         end
     end
@@ -7977,7 +8002,17 @@ end
         end
     end
     local function bi(bj)
-        return type(bj) == "string" and bj ~= "" and not bj:find('[\\/:%*%?"<>|]')
+        if type(bj) ~= "string" or bj == "" or #bj > 64 then
+            return false
+        end
+        if bj:find('[\\/:%*%?"<>|%c]') or bj == "." or bj == ".." then
+            return false
+        end
+        local up = bj:upper()
+        if up == "CON" or up == "PRN" or up == "AUX" or up == "NUL" or up:match("^COM%d$") or up:match("^LPT%d$") then
+            return false
+        end
+        return true
     end
     local function bj(bk, bl, bm)
         return e:JSONEncode({ Folder = bk.ConfigFolder, Name = bl, Version = a7, Config = e:JSONEncode(bm) })
@@ -8065,7 +8100,15 @@ end
             return false, "could not encode config"
         end
         bb(bp.ConfigFolder)
-        return pcall(writefile, a9(bp, bq), bt)
+        local path = a9(bp, bq)
+        local written, writeErr = pcall(writefile, path, bt)
+        if not written then
+            return false, writeErr
+        end
+        if type(isfile) == "function" and not isfile(path) then
+            return false, "config file was not written"
+        end
+        return true
     end
     local function bp(bq, br)
         if not ba() then
@@ -8099,10 +8142,11 @@ end
         local br, bs = bo(self, bq, bh(self))
         if br then
             self.ConfigName = bq
+            self._snapshotStale = true
         end
         return br, bs
     end
-    function a2:LoadConfig(bq, br)
+    function a2:LoadConfig(bq, br, strict)
         bq = bq or self.ConfigName
         if not bq then
             return false, "no config name"
@@ -8111,9 +8155,13 @@ end
         if not bs then
             return false, bt
         end
-        self:_applyFlags(bs, br)
+        if strict == nil then
+            strict = self.StrictLoad == true
+        end
+        self:_applyFlags(bs, br, strict)
         self.ConfigName = bq
         self.LoadedConfig = bq
+        self._snapshotStale = true
         self:_configChanged()
         return true
     end
@@ -8135,6 +8183,14 @@ end
         if self.LoadedConfig == bq then
             self.LoadedConfig = nil
         end
+        if self.ConfigName == bq then
+            self.ConfigName = nil
+        end
+        for _, mode in ipairs({ "Global", "Account" }) do
+            if self:GetAutoload(mode) == bq then
+                self:SetAutoload(nil, mode)
+            end
+        end
         self:_configChanged()
         return true
     end
@@ -8152,13 +8208,18 @@ end
         if not bs then
             return false, bt
         end
+        if type(delfile) ~= "function" then
+            return false, "rename needs delfile"
+        end
         local bu
         bu, bt = bo(self, br, bs)
         if not bu then
             return false, bt
         end
-        if type(delfile) == "function" then
-            pcall(delfile, a9(self, bq))
+        local removed, removeErr = pcall(delfile, a9(self, bq))
+        if not removed or isfile(a9(self, bq)) then
+            pcall(delfile, a9(self, br))
+            return false, removed and ("could not remove " .. bq) or tostring(removeErr)
         end
         if self.LoadedConfig == bq then
             self.LoadedConfig = br
@@ -8170,6 +8231,24 @@ end
             if self:GetAutoload(bw) == bq then
                 self:SetAutoload(br, bw)
             end
+        end
+        self:_configChanged()
+        return true
+    end
+    function a2:DuplicateConfig(src, dst)
+        if not bi(dst) then
+            return false, "invalid config name"
+        end
+        if self:ConfigExists(dst) then
+            return false, dst .. " already exists"
+        end
+        local data, err = bp(self, src)
+        if not data then
+            return false, err
+        end
+        local ok, saveErr = bo(self, dst, data)
+        if not ok then
+            return false, saveErr
         end
         self:_configChanged()
         return true
@@ -8196,6 +8275,7 @@ end
     end
     function a2:ResetConfig(bq)
         self._pendingFlags = {}
+        self._snapshotStale = true
         for br, bs in pairs(k.Flags) do
             if bs._defaultEntry and type(bs.Set) == "function" then
                 pcall(bf, bs, bs._defaultEntry, bq == true)
@@ -8229,13 +8309,16 @@ end
     function a2:ClearWorkspace()
         local br = bq(self.ConfigFolder)
         self.LoadedConfig = nil
+        self.ConfigName = nil
+        self._savedSnapshot = nil
+        self._snapshotStale = true
         for bs, bt in ipairs(self._workspaceListeners or {}) do
             aJ(bt)
         end
         self:_configChanged()
         return br
     end
-    function a2:ExportConfig(br)
+    function a2:ExportConfig(br, asCode)
         local bs, bt
         if br then
             bs, bt = bp(self, br)
@@ -8249,6 +8332,9 @@ end
         local bu, bv = pcall(bj, self, br, bs)
         if not bu then
             return nil, "could not encode config"
+        end
+        if asCode == true then
+            return a8 .. a2._b64encode(bv)
         end
         return bv
     end
@@ -8275,7 +8361,8 @@ end
                 return false, bx
             end
         end
-        self:_applyFlags(bu)
+        self:_applyFlags(bu, false, self.StrictLoad == true)
+        self._snapshotStale = true
         if bs then
             self.ConfigName = bs
             self.LoadedConfig = bs
@@ -8343,6 +8430,9 @@ end
         if not ba() then
             return false, "file API unavailable"
         end
+        if bv ~= nil and bv ~= "" and not bi(bv) then
+            return false, "invalid config name"
+        end
         bw = bw or self:GetAutoloadMode()
         local bx, by = true, nil
         if bv == nil or bv == "" then
@@ -8383,6 +8473,86 @@ end
             return false, "no autoload config"
         end
         return self:LoadConfig(bw, bv)
+    end
+    function a2._stable(value, depth)
+        depth = depth or 0
+        local kind = type(value)
+        if kind == "table" and depth < 8 then
+            local keys = {}
+            for key in pairs(value) do
+                keys[#keys + 1] = key
+            end
+            table.sort(keys, function(x, y)
+                return tostring(x) < tostring(y)
+            end)
+            local parts = {}
+            for _, key in ipairs(keys) do
+                parts[#parts + 1] = tostring(key) .. "=" .. a2._stable(value[key], depth + 1)
+            end
+            return "{" .. table.concat(parts, ",") .. "}"
+        end
+        return kind .. ":" .. tostring(value)
+    end
+    function a2._b64encode(data)
+        local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        local out = {}
+        for i = 1, #data, 3 do
+            local b1, b2, b3 = data:byte(i, i + 2)
+            local n = b1 * 65536 + (b2 or 0) * 256 + (b3 or 0)
+            local c1 = bit32.extract(n, 18, 6) + 1
+            local c2 = bit32.extract(n, 12, 6) + 1
+            local c3 = bit32.extract(n, 6, 6) + 1
+            local c4 = bit32.extract(n, 0, 6) + 1
+            out[#out + 1] = alphabet:sub(c1, c1)
+                .. alphabet:sub(c2, c2)
+                .. (b2 and alphabet:sub(c3, c3) or "=")
+                .. (b3 and alphabet:sub(c4, c4) or "=")
+        end
+        return table.concat(out)
+    end
+    function a2:_autoSaveTick()
+        local name = self.LoadedConfig or self.ConfigName
+        if not name or not bi(name) or not ba() then
+            return
+        end
+        local ok, snapshot = pcall(function()
+            return a2._stable(bh(self))
+        end)
+        if not ok then
+            return
+        end
+        if self._snapshotStale or self._savedSnapshot == nil then
+            self._savedSnapshot = snapshot
+            self._snapshotStale = false
+            return
+        end
+        if snapshot ~= self._savedSnapshot and self:SaveConfig(name) then
+            self._savedSnapshot = snapshot
+        end
+    end
+    function a2:GetAutoSave()
+        return self._autoSave == true
+    end
+    function a2:SetAutoSave(enabled, interval)
+        self._autoSave = enabled == true
+        self._autoSaveInterval = math.clamp(tonumber(interval) or self._autoSaveInterval or 3, 1, 60)
+        if self._autoSave then
+            self._snapshotStale = true
+        end
+        if self._autoSave and not self._autoSaveRunning then
+            self._autoSaveRunning = true
+            task.spawn(function()
+                while not self._destroyed and self._autoSave do
+                    task.wait(self._autoSaveInterval)
+                    if self._destroyed or not self._autoSave then
+                        break
+                    end
+                    pcall(self._autoSaveTick, self)
+                end
+                self._autoSaveRunning = false
+            end)
+        end
+        return true
     end
     k._themeListeners = {}
     local function bv(bw)
@@ -10096,6 +10266,14 @@ end
                 end,
             },
             {
+                Name = "Duplicate",
+                Callback = function()
+                    bR:Duplicate(nil, bY:Get())
+                end,
+            },
+        })
+        bP:ButtonRow({
+            {
                 Name = "Reset",
                 Style = "Danger",
                 Callback = function()
@@ -10112,6 +10290,18 @@ end
             AllowNone = false,
             Callback = function(b0)
                 bR:SetAutoloadMode(b0 == "This account" and "Account" or "Global")
+            end,
+        })
+        bP:Toggle({
+            Name = "Auto-save",
+            Default = bQ:GetAutoSave(),
+            Callback = function(enabled)
+                enabled = enabled == true
+                if enabled == bQ:GetAutoSave() then
+                    return
+                end
+                bQ:SetAutoSave(enabled)
+                bQ:_writeConfigSettings({ AutoSave = enabled })
             end,
         })
         bP:Button({
@@ -10156,7 +10346,7 @@ end
                 return
             end
             if not bi(b2) then
-                bV(false, "Invalid name", 'Names cannot contain \\ / : * ? " < > |')
+                bV(false, "Invalid name", 'Up to 64 characters, none of \\ / : * ? " < > |')
                 return
             end
             local b3, b4 = bQ:SaveConfig(b2)
@@ -10229,7 +10419,7 @@ end
                 return
             end
             if not bi(b3) then
-                bV(false, "Invalid name", 'Names cannot contain \\ / : * ? " < > |')
+                bV(false, "Invalid name", 'Up to 64 characters, none of \\ / : * ? " < > |')
                 return
             end
             local b4, b5 = bQ:RenameConfig(b2, b3)
@@ -10238,6 +10428,31 @@ end
                 b1(b3)
             end
             bV(b4, b4 and "Config renamed" or "Rename failed", b4 and (b2 .. " -> " .. b3) or tostring(b5))
+        end
+        function bR:Duplicate(b2, b3)
+            b2 = b2 or bX()
+            if not b2 then
+                return
+            end
+            b3 = bM(b3)
+            if b3 == "" then
+                b3 = b2 .. " copy"
+                local copyIndex = 2
+                while bQ:ConfigExists(b3) do
+                    b3 = ("%s copy %d"):format(b2, copyIndex)
+                    copyIndex += 1
+                end
+            end
+            if not bi(b3) then
+                bV(false, "Invalid name", 'Up to 64 characters, none of \\ / : * ? " < > |')
+                return
+            end
+            local b4, b5 = bQ:DuplicateConfig(b2, b3)
+            if b4 then
+                bY:Set("")
+                b1(b3)
+            end
+            bV(b4, b4 and "Config duplicated" or "Duplicate failed", b4 and (b2 .. " -> " .. b3) or tostring(b5))
         end
         function bR:Reset()
             bQ:Confirm({
@@ -10298,7 +10513,7 @@ end
             bV(b3 ~= false, b3 ~= false and "Autoload mode" or "Mode change failed", b3 ~= false and b5 or tostring(b4))
         end
         function bR:Export(b2)
-            local b3, b4 = bQ:ExportConfig(b2)
+            local b3, b4 = bQ:ExportConfig(b2, true)
             if not b3 then
                 bV(false, "Export failed", tostring(b4))
                 return nil
@@ -10329,7 +10544,7 @@ end
                     end
                 end
             elseif not bi(b5) then
-                bV(false, "Invalid name", 'Names cannot contain \\ / : * ? " < > |')
+                bV(false, "Invalid name", 'Up to 64 characters, none of \\ / : * ? " < > |')
                 return
             end
             local function b6()
