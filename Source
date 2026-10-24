@@ -4479,98 +4479,399 @@ local a = (function()
         task.defer(bc, true)
         return m(self, aU, bd, aV, "Stepper")
     end
-    function aS:Progress(aU)
-        aU = l(aU, { Title = "Name", Description = "Desc", CurrentValue = "Default", Value = "Default" })
-        local aV = aM(self)
-        local aW = aV.Compact
-        local aX = aW and 6 or 10
-        local aY, aZ = aO(self, "Frame", (aU.Desc and aV.DescHeight or aV.Height) + aX, aU)
-        aG(aY, aZ)
-        local a_
-        if aU.Desc then
-            a_ = math.floor((aV.DescHeight - (aV.DescGap + aV.DescLine)) / 2) - 2
-        else
-            a_ = aW and 5 or 12
+    -- Shared helpers for Progress / Status / StatusList / Table.
+    -- Stored on `k` (not as new locals) because the enclosing function is close to Luau's 200-local limit.
+    -- Names start with "_" so the public-API proxy at the end of the file leaves them unwrapped.
+    function k._formatNumber(value, decimals, separator, abbreviate)
+        if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then
+            return tostring(value)
         end
-        am({
-            Position = UDim2.fromOffset(14, a_),
+        local suffix = ""
+        if abbreviate then
+            local units = { "K", "M", "B", "T", "Qa" }
+            local scaled = value
+            local step = 0
+            while math.abs(scaled) >= 1000 and step < #units do
+                scaled = scaled / 1000
+                step = step + 1
+            end
+            if step > 0 then
+                value = scaled
+                suffix = units[step]
+                if decimals == nil then
+                    decimals = 1
+                end
+            end
+        end
+        local text
+        if decimals ~= nil then
+            text = string.format("%." .. math.clamp(math.floor(tonumber(decimals) or 0), 0, 8) .. "f", value)
+        elseif value == math.floor(value) and math.abs(value) < 1e15 then
+            text = string.format("%d", value)
+        else
+            text = string.format("%.2f", value)
+            text = text:gsub("0+$", "")
+            text = text:gsub("%.$", "")
+        end
+        if suffix ~= "" and text:find(".", 1, true) then
+            text = text:gsub("0+$", "")
+            text = text:gsub("%.$", "")
+        end
+        if separator ~= false then
+            local sign, whole, rest = text:match("^(%-?)(%d+)(.*)$")
+            if whole and #whole > 3 then
+                whole = whole:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+                text = sign .. whole .. rest
+            end
+        end
+        return text .. suffix
+    end
+    -- Colour thresholds: { { 0, "Error" }, { 0.35, "Warning" }, { 0.7, "Success" } } (fraction 0..1, ascending).
+    -- `preset` ("auto" / "inverse") builds a ready-made list when no explicit list is given.
+    function k._buildStops(source, preset)
+        if source == nil and preset then
+            if type(preset) == "string" and (string.lower(preset) == "inverse" or string.lower(preset) == "reverse") then
+                source = { { 0, "Success" }, { 0.67, "Warning" }, { 0.9, "Error" } }
+            else
+                source = { { 0, "Error" }, { 0.34, "Warning" }, { 0.67, "Success" } }
+            end
+        end
+        local stops = {}
+        if type(source) == "table" then
+            for index, entry in ipairs(source) do
+                if type(entry) == "table" then
+                    local at = tonumber(entry.At or entry.From or entry[1])
+                    local color = entry.Color
+                    if color == nil then
+                        color = entry.Tone
+                    end
+                    if color == nil then
+                        color = entry[2]
+                    end
+                    if at ~= nil and color ~= nil then
+                        stops[#stops + 1] = { At = at, Color = color }
+                    end
+                end
+            end
+            table.sort(stops, function(left, right)
+                return left.At < right.At
+            end)
+        end
+        return stops
+    end
+    function k._pickStop(stops, fraction)
+        local picked = nil
+        for index = 1, #stops do
+            if fraction >= stops[index].At then
+                picked = stops[index].Color
+            else
+                break
+            end
+        end
+        return picked
+    end
+    -- True while `element` (living in `owner`, a tab / sub-tab / groupbox) can actually be seen by the user.
+    function k._isLive(owner, window, element)
+        if window._destroyed or not window.Open or window.Minimized or element._userVisible == false then
+            return false
+        end
+        if owner._groupbox then
+            if owner._userVisible == false then
+                return false
+            end
+            owner = owner.Parent
+        end
+        if owner._isSubTab then
+            if owner.Parent.CurrentSubTab ~= owner then
+                return false
+            end
+            owner = owner.Parent
+        end
+        return window.CurrentTab == owner
+    end
+    -- Runs `step` immediately, then every `getRate()` seconds while `canRun()` allows it, until the element is destroyed.
+    function k._poll(element, frame, getRate, canRun, step)
+        local running = true
+        element._listeners = element._listeners or {}
+        table.insert(element._listeners, function()
+            running = false
+        end)
+        task.defer(function()
+            local first = true
+            while running and frame.Parent do
+                if first or canRun() then
+                    first = false
+                    step()
+                end
+                task.wait(getRate())
+            end
+        end)
+    end
+    function aS:Progress(options)
+        options = l(options, { Title = "Name", Description = "Desc", CurrentValue = "Default", Value = "Default" })
+        local metrics = aM(self)
+        local compact = metrics.Compact
+        local window = self.Window
+        local card, cardStroke =
+            aO(self, "Frame", (options.Desc and metrics.DescHeight or metrics.Height) + (compact and 6 or 10), options)
+        aG(card, cardStroke)
+        local textTop
+        if options.Desc then
+            textTop = math.floor((metrics.DescHeight - (metrics.DescGap + metrics.DescLine)) / 2) - 2
+        else
+            textTop = compact and 5 or 12
+        end
+        local titleLabel = am({
+            Position = UDim2.fromOffset(14, textTop),
             Size = UDim2.new(1, -110, 0, 18),
-            Text = aU.Name or "Progress",
-            TextSize = aV.TextSize,
-            Parent = aY,
+            Text = tostring(options.Name or "Progress"),
+            TextSize = metrics.TextSize,
+            Parent = card,
         })
-        if aU.Desc then
-            am({
-                Position = UDim2.fromOffset(14, a_ + aV.DescGap),
-                Size = UDim2.new(1, -110, 0, aV.DescLine),
-                Text = aU.Desc,
-                TextSize = aV.DescSize,
+        local descLabel
+        if options.Desc then
+            descLabel = am({
+                Position = UDim2.fromOffset(14, textTop + metrics.DescGap),
+                Size = UDim2.new(1, -28, 0, metrics.DescLine),
+                Text = tostring(options.Desc),
+                TextSize = metrics.DescSize,
                 FontFace = D.Regular,
                 TextColor3 = z.Muted,
-                Parent = aY,
+                Parent = card,
             })
         end
-        local a0 = am({
+        local valueLabel = am({
             AnchorPoint = Vector2.new(1, 0),
-            Position = UDim2.new(1, -14, 0, a_),
-            Size = UDim2.fromOffset(90, 18),
+            Position = UDim2.new(1, -14, 0, textTop),
+            Size = UDim2.new(0, 0, 0, 18),
+            AutomaticSize = Enum.AutomaticSize.X,
             TextXAlignment = Enum.TextXAlignment.Right,
             TextSize = 13,
-            TextColor3 = k._color(aU.TextColor) or z.Accent,
+            TextColor3 = z.Accent,
+            TextTruncate = Enum.TextTruncate.None,
             RichText = true,
-            Parent = aY,
+            Parent = card,
         })
-        local a1 = ai(
-            "Frame",
-            {
-                Position = UDim2.new(0, 14, 1, aW and -12 or -16),
-                Size = UDim2.new(1, -28, 0, 5),
-                BackgroundColor3 = z.Surface3,
-                BorderSizePixel = 0,
-                Parent = aY,
-            }
-        )
-        aj(a1, UDim.new(1, 0))
-        local a2 = ai(
-            "Frame",
-            { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = k._color(aU.Color) or z.Accent, BorderSizePixel = 0, Parent = a1 }
-        )
-        aj(a2, UDim.new(1, 0))
-        local a3 = { Value = math.clamp(aU.Default or 0, 0, 1) }
-        local a4 = aU.Format
-        local function a5(a6)
-            local a7 = a3.Value
-            ah(a2, { Size = UDim2.new(a7, 0, 1, 0) }, a6, Enum.EasingStyle.Quint)
-            if type(a4) == "function" then
-                a0.Text = k._rich(a4(a7))
-            else
-                a0.Text = string.format("%d%%", math.floor(a7 * 100 + 0.5))
-            end
+        -- the title always keeps the room the value text needs (custom Format strings can be long)
+        local function fitTitle()
+            local cardWidth = card.AbsoluteSize.X / math.max(window.Scale.Scale, 0.01)
+            local valueWidth = math.min(valueLabel.TextBounds.X, math.floor(cardWidth * 0.55))
+            titleLabel.Size = UDim2.new(1, -(36 + math.ceil(valueWidth)), 0, 18)
         end
-        function a3:Set(a6, a7)
-            a6 = math.clamp(tonumber(a6) or 0, 0, 1)
-            if a6 == a3.Value then
+        valueLabel:GetPropertyChangedSignal("TextBounds"):Connect(fitTitle)
+        card:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitTitle)
+        local track = ai("Frame", {
+            Position = UDim2.new(0, 14, 1, compact and -12 or -16),
+            Size = UDim2.new(1, -28, 0, 5),
+            BackgroundColor3 = z.Surface3,
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+            Parent = card,
+        })
+        aj(track, UDim.new(1, 0))
+        local fill = ai("Frame", {
+            Size = UDim2.new(0, 0, 1, 0),
+            BackgroundColor3 = z.Accent,
+            BorderSizePixel = 0,
+            Parent = track,
+        })
+        aj(fill, UDim.new(1, 0))
+        local sweep = ai("Frame", {
+            Position = UDim2.fromScale(-0.4, 0),
+            Size = UDim2.fromScale(0.4, 1),
+            BackgroundColor3 = z.Accent,
+            BorderSizePixel = 0,
+            Visible = false,
+            Parent = track,
+        })
+        aj(sweep, UDim.new(1, 0))
+
+        local api = { _listeners = {} }
+        local minValue = tonumber(options.Min) or 0
+        local maxValue = tonumber(options.Max) or 1
+        if maxValue <= minValue then
+            maxValue = minValue + 1
+        end
+        local function clampValue(value)
+            return math.clamp(tonumber(value) or minValue, minValue, maxValue)
+        end
+        local function toFraction(value)
+            return math.clamp((value - minValue) / (maxValue - minValue), 0, 1)
+        end
+        api.Value = clampValue(options.Default)
+        local barColorSpec = options.Color
+        if barColorSpec == nil then
+            barColorSpec = options.Tone
+        end
+        local textColorSpec = options.TextColor
+        local formatFunction = options.Format
+        local stops = k._buildStops(options.Thresholds, options.AutoColor)
+        local indeterminate = options.Indeterminate == true
+        local sweepTween = nil
+
+        local function barColor(fraction)
+            local spec = barColorSpec
+            if spec == nil and #stops > 0 then
+                spec = k._pickStop(stops, fraction)
+            end
+            return k._color(spec) or z.Accent
+        end
+        local function render(duration)
+            local fraction = toFraction(api.Value)
+            local color = barColor(fraction)
+            local colorTime = duration > 0 and 0.25 or 0
+            if indeterminate then
+                ah(sweep, { BackgroundColor3 = color }, colorTime)
+            else
+                ah(fill, { Size = UDim2.new(fraction, 0, 1, 0), BackgroundColor3 = color }, duration, Enum.EasingStyle.Quint)
+            end
+            local text
+            if indeterminate then
+                text = tostring(options.IndeterminateText or "...")
+            else
+                text = string.format("%d%%", math.floor(fraction * 100 + 0.5))
+                if type(formatFunction) == "function" then
+                    local ok, result = pcall(formatFunction, api.Value, fraction, minValue, maxValue)
+                    if ok and result ~= nil then
+                        text = tostring(result)
+                    end
+                end
+            end
+            valueLabel.Text = k._rich(text)
+            local labelColor
+            if textColorSpec ~= nil then
+                labelColor = k._color(textColorSpec) or z.Accent
+            elseif barColorSpec == nil and #stops > 0 then
+                labelColor = color
+            else
+                labelColor = z.Accent
+            end
+            ah(valueLabel, { TextColor3 = labelColor }, colorTime)
+        end
+        local function setIndeterminate(enabled)
+            enabled = enabled and true or false
+            if sweepTween then
+                sweepTween:Cancel()
+                sweepTween = nil
+            end
+            indeterminate = enabled
+            fill.Visible = not enabled
+            sweep.Visible = enabled
+            if enabled then
+                sweep.Position = UDim2.fromScale(-0.4, 0)
+                sweepTween = a:Create(
+                    sweep,
+                    TweenInfo.new(1.1, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut, -1),
+                    { Position = UDim2.fromScale(1, 0) }
+                )
+                sweepTween:Play()
+            end
+            render(0)
+        end
+
+        function api:Set(value, silent)
+            value = clampValue(value)
+            if value == api.Value then
                 return
             end
-            a3.Value = a6
-            a5(0.35)
-            if not a7 then
-                aJ(aU.Callback, a6)
+            api.Value = value
+            render(0.35)
+            if not silent then
+                aJ(options.Callback, value, toFraction(value))
             end
         end
-        function a3:Get()
-            return a3.Value
+        function api:Get()
+            return api.Value
         end
-        function a3:SetColor(a6)
-            ah(a2, { BackgroundColor3 = k._color(a6) or z.Accent }, 0.25)
+        function api:GetFraction()
+            return toFraction(api.Value)
         end
-        function a3:SetTextColor(a6)
-            ah(a0, { TextColor3 = k._color(a6) or z.Accent }, 0.25)
+        function api:GetPercent()
+            return toFraction(api.Value) * 100
         end
-        ag(a0, function()
-            a5(0)
+        function api:Add(delta, silent)
+            api:Set(api.Value + (tonumber(delta) or 0), silent)
+        end
+        function api:SetRange(newMin, newMax)
+            newMin = tonumber(newMin) or minValue
+            newMax = tonumber(newMax) or maxValue
+            if newMax <= newMin then
+                newMax = newMin + 1
+            end
+            minValue, maxValue = newMin, newMax
+            api.Value = clampValue(api.Value)
+            render(0.25)
+        end
+        function api:SetColor(color)
+            barColorSpec = color
+            render(0.25)
+        end
+        function api:SetTextColor(color)
+            textColorSpec = color
+            render(0.25)
+        end
+        function api:SetThresholds(source)
+            stops = k._buildStops(source, nil)
+            render(0.25)
+        end
+        function api:SetFormat(callback)
+            formatFunction = callback
+            render(0)
+        end
+        function api:SetName(text)
+            titleLabel.Text = tostring(text == nil and "" or text)
+            api._searchName = titleLabel.Text
+            api._searchKey = string.lower(titleLabel.Text)
+        end
+        function api:SetDescription(text)
+            if descLabel then
+                descLabel.Text = tostring(text == nil and "" or text)
+            end
+        end
+        function api:SetIndeterminate(enabled)
+            setIndeterminate(enabled)
+        end
+        function api:IsIndeterminate()
+            return indeterminate
+        end
+        table.insert(api._listeners, function()
+            if sweepTween then
+                sweepTween:Cancel()
+                sweepTween = nil
+            end
         end)
-        return m(self, aU, a3, aY, "Progress")
+
+        local updateRate = math.max(tonumber(options.UpdateRate) or 1, 0.05)
+        function api:SetUpdateRate(rate)
+            updateRate = math.max(tonumber(rate) or updateRate, 0.05)
+        end
+        if type(options.Update) == "function" then
+            k._poll(api, card, function()
+                return updateRate
+            end, function()
+                return options.AlwaysUpdate == true or k._isLive(self, window, api)
+            end, function()
+                local ok, value, newMax = aK(options.Update)
+                if not ok then
+                    warn("[AirFlow] progress update error: " .. tostring(value))
+                    return
+                end
+                if type(newMax) == "number" and newMax ~= maxValue then
+                    api:SetRange(minValue, newMax)
+                end
+                if value ~= nil then
+                    api:Set(value, true)
+                end
+            end)
+        end
+
+        ag(valueLabel, function()
+            render(0)
+        end)
+        if indeterminate then
+            setIndeterminate(true)
+        end
+        return m(self, options, api, card, "Progress")
     end
     function aS:OrderList(aU)
         aU = l(aU, { Title = "Name", Description = "Desc", Options = "Items", Values = "Items" })
@@ -11143,38 +11444,52 @@ end
         end
         return nil, nil
     end
-    function aS:Status(bU)
-        bU = l(bU, { Title = "Name", Text = "Value", Content = "Value", CurrentValue = "Value", Default = "Value" })
-        local bV = bQ[bU.Style] and bU.Style or "Plain"
-        local bW = aM(self).Compact
-        local bX = self.Window
-        local bY = bQ[bV]
-        local bZ = bW and 0 or 8
-        local b_ = aO(self, "Frame", bY + bZ * 2, bU)
-        local b0 = ai(
-            "Frame",
-            { Position = UDim2.fromOffset(14, bZ), Size = UDim2.new(1, -28, 0, bY), BackgroundTransparency = 1, Parent = b_ }
-        )
-        local b1 =
-            { Value = bU.Value, Max = bU.Max, Tone = bU.Tone or "Accent", Name = bU.Name or "", Color = bU.Color
-                or bU.ValueColor }
-        local b2, b3, b4, b5, b6, b7, b8
-        local b9 = false
-        local function ca()
-            return bV == "Plain" and (b1.Name .. ":") or b1.Name
+    function aS:Status(options)
+        options = l(options, { Title = "Name", Text = "Value", Content = "Value", CurrentValue = "Value", Default = "Value" })
+        local style = bQ[options.Style] and options.Style or "Plain"
+        local compact = aM(self).Compact
+        local window = self.Window
+        local height = bQ[style]
+        local pad = compact and 0 or 8
+        local card = aO(self, "Frame", height + pad * 2, options)
+        local body = ai("Frame", {
+            Position = UDim2.fromOffset(14, pad),
+            Size = UDim2.new(1, -28, 0, height),
+            BackgroundTransparency = 1,
+            Parent = card,
+        })
+        local api = {
+            Value = options.Value,
+            Max = options.Max,
+            Tone = options.Tone or "Accent",
+            Name = options.Name or "",
+            Color = options.Color or options.ValueColor,
+            _listeners = {},
+        }
+        local prefix = tostring(options.Prefix or "")
+        local suffix = tostring(options.Suffix or "")
+        local stops = k._buildStops(options.Thresholds, options.AutoTone)
+        local nameLabel, valueLabel, badge, badgeStroke, dot, pulseRing, barFill
+        local isBadge = false
+        local pulseTween = nil
+        local pulseEnabled = options.Pulse ~= false
+        local fraction = nil
+        local lastText = nil
+
+        local function displayName()
+            local name = tostring(api.Name)
+            return style == "Plain" and (name .. ":") or name
         end
-        if bV == "Plain" then
-            ai(
-                "UIListLayout",
-                {
-                    FillDirection = Enum.FillDirection.Horizontal,
-                    VerticalAlignment = Enum.VerticalAlignment.Center,
-                    SortOrder = Enum.SortOrder.LayoutOrder,
-                    Padding = UDim.new(0, 5),
-                    Parent = b0,
-                }
-            )
-            b2 = am({
+
+        if style == "Plain" then
+            ai("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
+                VerticalAlignment = Enum.VerticalAlignment.Center,
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 5),
+                Parent = body,
+            })
+            nameLabel = am({
                 Size = UDim2.new(0, 0, 1, 0),
                 AutomaticSize = Enum.AutomaticSize.X,
                 TextSize = 12,
@@ -11182,328 +11497,458 @@ end
                 TextColor3 = z.Muted,
                 TextTruncate = Enum.TextTruncate.None,
                 LayoutOrder = 1,
-                Parent = b0,
+                Parent = body,
             })
-            b3 = am({
-                Size = UDim2.new(0, 0, 1, 0),
-                AutomaticSize = Enum.AutomaticSize.X,
+            -- the value takes whatever width the name leaves and is cut with "..." instead of spilling out of the card
+            valueLabel = am({
+                Size = UDim2.new(1, -5, 1, 0),
                 TextSize = 12,
                 TextColor3 = z.Text,
-                TextTruncate = Enum.TextTruncate.None,
                 LayoutOrder = 2,
-                Parent = b0,
+                Parent = body,
             })
-        elseif bV == "Stat" then
-            b2 =
-                am({ Position = UDim2.fromOffset(0, 3), Size = UDim2.new(1, 0, 0, 14), TextSize = 11, TextColor3 = z.Muted, Parent = b0 })
-            b3 = am({
+            local function fitValue()
+                local nameWidth = math.ceil(nameLabel.AbsoluteSize.X / math.max(window.Scale.Scale, 0.01))
+                valueLabel.Size = UDim2.new(1, -(nameWidth + 5), 1, 0)
+            end
+            nameLabel:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitValue)
+            fitValue()
+        elseif style == "Stat" then
+            nameLabel = am({
+                Position = UDim2.fromOffset(0, 3),
+                Size = UDim2.new(1, 0, 0, 14),
+                TextSize = 11,
+                TextColor3 = z.Muted,
+                Parent = body,
+            })
+            valueLabel = am({
                 Position = UDim2.fromOffset(0, 18),
                 Size = UDim2.new(1, 0, 0, 24),
                 TextSize = 20,
                 FontFace = D.Bold,
                 TextColor3 = z.Text,
-                Parent = b0,
+                Parent = body,
             })
         else
-            local cb = 0
-            if bV == "Dot" then
-                cb = 18
-                b7 = ai(
-                    "Frame",
-                    {
-                        AnchorPoint = Vector2.new(0.5, 0.5),
-                        Position = UDim2.new(0, 5, 0.5, 0),
-                        Size = UDim2.fromOffset(8, 8),
-                        BackgroundColor3 = bR(b1.Tone),
-                        BackgroundTransparency = 0.4,
-                        BorderSizePixel = 0,
-                        Parent = b0,
-                    }
-                )
-                aj(b7, UDim.new(1, 0))
-                b6 = ai(
-                    "Frame",
-                    {
-                        AnchorPoint = Vector2.new(0.5, 0.5),
-                        Position = UDim2.new(0, 5, 0.5, 0),
-                        Size = UDim2.fromOffset(8, 8),
-                        BackgroundColor3 = bR(b1.Tone),
-                        BorderSizePixel = 0,
-                        Parent = b0,
-                    }
-                )
-                aj(b6, UDim.new(1, 0))
-                if bU.Pulse ~= false then
-                    a:Create(
-                        b7,
-                        TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, -1),
-                        { Size = UDim2.fromOffset(20, 20), BackgroundTransparency = 1 }
-                    ):Play()
-                else
-                    b7.Visible = false
-                end
+            local textOffset = 0
+            if style == "Dot" then
+                textOffset = 18
+                pulseRing = ai("Frame", {
+                    AnchorPoint = Vector2.new(0.5, 0.5),
+                    Position = UDim2.new(0, 5, 0.5, 0),
+                    Size = UDim2.fromOffset(8, 8),
+                    BackgroundColor3 = bR(api.Tone),
+                    BackgroundTransparency = 0.4,
+                    BorderSizePixel = 0,
+                    Parent = body,
+                })
+                aj(pulseRing, UDim.new(1, 0))
+                dot = ai("Frame", {
+                    AnchorPoint = Vector2.new(0.5, 0.5),
+                    Position = UDim2.new(0, 5, 0.5, 0),
+                    Size = UDim2.fromOffset(8, 8),
+                    BackgroundColor3 = bR(api.Tone),
+                    BorderSizePixel = 0,
+                    Parent = body,
+                })
+                aj(dot, UDim.new(1, 0))
             end
-            local cc = bV == "Bar" and 18 or bY
-            b2 = am({
-                Position = UDim2.fromOffset(cb, 0),
-                Size = UDim2.new(0.55, -cb, 0, cc),
+            local labelHeight = style == "Bar" and 18 or height
+            nameLabel = am({
+                Position = UDim2.fromOffset(textOffset, 0),
+                Size = UDim2.new(0.55, -textOffset, 0, labelHeight),
                 TextSize = 12,
                 FontFace = D.Regular,
                 TextColor3 = z.Muted,
-                Parent = b0,
+                Parent = body,
             })
-            if bV == "Badge" then
-                b9 = true
-                b4 = ai(
-                    "Frame",
-                    {
-                        AnchorPoint = Vector2.new(1, 0.5),
-                        Position = UDim2.new(1, 0, 0.5, 0),
-                        Size = UDim2.fromOffset(0, 22),
-                        AutomaticSize = Enum.AutomaticSize.X,
-                        BackgroundColor3 = bR(b1.Tone),
-                        BackgroundTransparency = 0.86,
-                        BorderSizePixel = 0,
-                        Parent = b0,
-                    }
-                )
-                aj(b4, UDim.new(1, 0))
-                b5 = ak(b4, bR(b1.Tone), 0.6)
-                al(b4, 10, 10)
-                b3 = am({
+            if style == "Badge" then
+                isBadge = true
+                badge = ai("Frame", {
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    Position = UDim2.new(1, 0, 0.5, 0),
+                    Size = UDim2.fromOffset(0, 22),
+                    AutomaticSize = Enum.AutomaticSize.X,
+                    BackgroundColor3 = bR(api.Tone),
+                    BackgroundTransparency = 0.86,
+                    BorderSizePixel = 0,
+                    Parent = body,
+                })
+                aj(badge, UDim.new(1, 0))
+                badgeStroke = ak(badge, bR(api.Tone), 0.6)
+                al(badge, 10, 10)
+                valueLabel = am({
                     Size = UDim2.new(0, 0, 1, 0),
                     AutomaticSize = Enum.AutomaticSize.X,
                     TextSize = 12,
-                    TextColor3 = bR(b1.Tone),
+                    TextColor3 = bR(api.Tone),
                     TextTruncate = Enum.TextTruncate.None,
-                    Parent = b4,
+                    Parent = badge,
                 })
             else
-                b3 = am({
+                valueLabel = am({
                     AnchorPoint = Vector2.new(1, 0),
                     Position = UDim2.new(1, 0, 0, 0),
-                    Size = UDim2.new(0.45, 0, 0, cc),
+                    Size = UDim2.new(0.45, 0, 0, labelHeight),
                     TextSize = 12,
                     TextColor3 = z.Text,
                     TextXAlignment = Enum.TextXAlignment.Right,
-                    Parent = b0,
+                    Parent = body,
                 })
             end
-            if bV == "Bar" then
-                local cd = ai(
-                    "Frame",
-                    {
-                        Position = UDim2.fromOffset(0, 25),
-                        Size = UDim2.new(1, 0, 0, 5),
-                        BackgroundColor3 = z.Surface3,
-                        BorderSizePixel = 0,
-                        ClipsDescendants = true,
-                        Parent = b0,
-                    }
-                )
-                aj(cd, UDim.new(1, 0))
-                b8 = ai(
-                    "Frame",
-                    { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = bR(b1.Tone), BorderSizePixel = 0, Parent = cd }
-                )
-                aj(b8, UDim.new(1, 0))
+            if style == "Bar" then
+                local track = ai("Frame", {
+                    Position = UDim2.fromOffset(0, 25),
+                    Size = UDim2.new(1, 0, 0, 5),
+                    BackgroundColor3 = z.Surface3,
+                    BorderSizePixel = 0,
+                    ClipsDescendants = true,
+                    Parent = body,
+                })
+                aj(track, UDim.new(1, 0))
+                barFill = ai("Frame", {
+                    Size = UDim2.new(0, 0, 1, 0),
+                    BackgroundColor3 = bR(api.Tone),
+                    BorderSizePixel = 0,
+                    Parent = track,
+                })
+                aj(barFill, UDim.new(1, 0))
             end
         end
-        local cb = nil
-        local function cc(cd)
-            b2.Text = k._rich(ca())
-            local ce = b1.Value
-            local cf = ce == nil and (bU.Placeholder or "-") or tostring(ce)
-            if bV == "Bar" then
-                local cg, ch = bT(ce, b1.Max)
-                if cg and ch then
-                    b1.Max = ch
-                    cf = bS(cg) .. " / " .. bS(ch)
-                    local ci = ch > 0 and math.clamp(cg / ch, 0, 1) or 0
-                    ah(b8, { Size = UDim2.new(ci, 0, 1, 0) }, cd and 0.4 or 0, Enum.EasingStyle.Quint)
-                elseif type(ce) == "number" and ce <= 1 then
-                    cf = string.format("%d%%", math.floor(ce * 100 + 0.5))
-                    ah(b8, { Size = UDim2.new(math.clamp(ce, 0, 1), 0, 1, 0) }, cd and 0.4 or 0, Enum.EasingStyle.Quint)
+        nameLabel.RichText = true
+        valueLabel.RichText = true
+
+        local function applyPulse(enabled)
+            pulseEnabled = enabled and true or false
+            if pulseTween then
+                pulseTween:Cancel()
+                pulseTween = nil
+            end
+            if not pulseRing then
+                return
+            end
+            if pulseEnabled then
+                pulseRing.Visible = true
+                pulseRing.Size = UDim2.fromOffset(8, 8)
+                pulseRing.BackgroundTransparency = 0.4
+                pulseTween = a:Create(
+                    pulseRing,
+                    TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, -1),
+                    { Size = UDim2.fromOffset(20, 20), BackgroundTransparency = 1 }
+                )
+                pulseTween:Play()
+            else
+                pulseRing.Visible = false
+            end
+        end
+        applyPulse(pulseEnabled)
+        table.insert(api._listeners, function()
+            if pulseTween then
+                pulseTween:Cancel()
+                pulseTween = nil
+            end
+        end)
+
+        -- tone actually shown: thresholds (opt-in) win over the static Tone while a fraction is known
+        local function effectiveTone()
+            if #stops > 0 and fraction ~= nil then
+                local spec = k._pickStop(stops, fraction)
+                if spec ~= nil then
+                    return spec
                 end
             end
-            cf = k._rich((bU.Prefix or "") .. cf .. (bU.Suffix or ""))
-            local cg = cb ~= nil and cf ~= cb
-            cb = cf
-            b3.Text = cf
-            local ch = bR(b1.Tone)
-            local ci = cd and 0.25 or 0
-            local cj = not b9 and k._color(b1.Color) or z.Text
-            if not b9 and not (cg and cd and bU.Flash ~= false) then
-                ah(b3, { TextColor3 = cj }, ci)
+            return api.Tone
+        end
+        local function valueColor()
+            if api.Color ~= nil then
+                return k._color(api.Color) or z.Text
             end
-            if b4 then
-                ah(b4, { BackgroundColor3 = ch }, ci)
-                ah(b5, { Color = ch }, ci)
-                ah(b3, { TextColor3 = ch }, ci)
+            if #stops > 0 and fraction ~= nil then
+                return bR(effectiveTone())
             end
-            if b6 then
-                ah(b6, { BackgroundColor3 = ch }, ci)
-                ah(b7, { BackgroundColor3 = ch }, 0)
+            return z.Text
+        end
+        local function formatValue(value)
+            if type(options.Format) == "function" then
+                local ok, result = pcall(options.Format, value, api.Max)
+                if ok and result ~= nil then
+                    return tostring(result)
+                end
             end
-            if b8 then
-                ah(b8, { BackgroundColor3 = ch }, ci)
+            if type(value) == "number" then
+                return k._formatNumber(value, options.Decimals, options.Separator, options.Abbreviate)
             end
-            if cg and cd and not b9 and bU.Flash ~= false then
-                ah(b3, { TextColor3 = z.Accent }, 0.08)
+            return tostring(value)
+        end
+
+        local function refresh(animate)
+            nameLabel.Text = k._rich(displayName())
+            local value = api.Value
+            local current, maximum = bT(value, api.Max)
+            local text
+            local barFraction = 0
+            fraction = nil
+            if current and maximum then
+                api.Max = maximum
+                fraction = maximum > 0 and math.clamp(current / maximum, 0, 1) or 0
+            end
+            if value == nil then
+                text = tostring(options.Placeholder or "-")
+            elseif style == "Bar" and current and maximum then
+                text = k._formatNumber(current, options.Decimals, options.Separator, options.Abbreviate)
+                    .. " / "
+                    .. k._formatNumber(maximum, options.Decimals, options.Separator, options.Abbreviate)
+                barFraction = fraction
+            elseif style == "Bar" and type(value) == "number" and value <= 1 then
+                text = string.format("%d%%", math.floor(value * 100 + 0.5))
+                barFraction = math.clamp(value, 0, 1)
+                fraction = barFraction
+            else
+                text = formatValue(value)
+            end
+            text = k._rich(prefix .. text .. suffix)
+            local changed = lastText ~= nil and text ~= lastText
+            lastText = text
+            valueLabel.Text = text
+            local tone = bR(effectiveTone())
+            local colorTime = animate and 0.25 or 0
+            local flash = changed and animate and not isBadge and options.Flash ~= false
+            if not isBadge and not flash then
+                ah(valueLabel, { TextColor3 = valueColor() }, colorTime)
+            end
+            if badge then
+                ah(badge, { BackgroundColor3 = tone }, colorTime)
+                ah(badgeStroke, { Color = tone }, colorTime)
+                ah(valueLabel, { TextColor3 = tone }, colorTime)
+            end
+            if dot then
+                ah(dot, { BackgroundColor3 = tone }, colorTime)
+                ah(pulseRing, { BackgroundColor3 = tone }, 0)
+            end
+            if barFill then
+                ah(barFill, { Size = UDim2.new(barFraction, 0, 1, 0), BackgroundColor3 = tone }, animate and 0.4 or 0, Enum.EasingStyle.Quint)
+            end
+            if flash then
+                ah(valueLabel, { TextColor3 = z.Accent }, 0.08)
                 task.delay(0.1, function()
-                    if b3.Parent then
-                        ah(b3, { TextColor3 = k._color(b1.Color) or z.Text }, 0.45)
+                    if valueLabel.Parent then
+                        ah(valueLabel, { TextColor3 = valueColor() }, 0.45)
                     end
                 end)
             end
         end
-        b2.RichText = true
-        b3.RichText = true
-        ag(b0, function()
-            if cb ~= nil then
-                cc(false)
+        ag(body, function()
+            if lastText ~= nil then
+                refresh(false)
             end
         end)
-        function b1:Set(cd, ce)
-            b1.Value = cd
-            if ce ~= nil then
-                b1.Max = ce
+
+        function api:Set(value, maximum)
+            api.Value = value
+            if maximum ~= nil then
+                api.Max = maximum
             end
-            cc(true)
+            refresh(true)
         end
-        function b1:Get()
-            return b1.Value
+        function api:Get()
+            return api.Value
         end
-        function b1:SetTone(cd)
-            b1.Tone = cd
-            cc(true)
+        function api:GetMax()
+            return api.Max
         end
-        function b1:SetColor(cd)
-            b1.Color = cd
-            cc(true)
+        function api:SetTone(tone)
+            api.Tone = tone
+            refresh(true)
         end
-        function b1:SetName(cd)
-            b1.Name = tostring(cd)
-            cc(false)
+        function api:SetColor(color)
+            api.Color = color
+            refresh(true)
         end
-        function b1:Text()
-            return b3.Text
+        function api:SetName(name)
+            api.Name = tostring(name)
+            refresh(false)
         end
-        function b1._shownColor()
-            if b1.Color ~= nil then
-                return k._color(b1.Color) or z.Text
+        function api:SetPrefix(text)
+            prefix = tostring(text or "")
+            refresh(false)
+        end
+        function api:SetSuffix(text)
+            suffix = tostring(text or "")
+            refresh(false)
+        end
+        function api:SetFormat(callback)
+            options.Format = callback
+            refresh(false)
+        end
+        function api:SetThresholds(source)
+            stops = k._buildStops(source, nil)
+            refresh(true)
+        end
+        function api:SetPulse(enabled)
+            applyPulse(enabled)
+        end
+        function api:Text()
+            return valueLabel.Text
+        end
+        function api._shownColor()
+            if api.Color ~= nil then
+                return k._color(api.Color) or z.Text
             end
-            if bV == "Badge" or bV == "Dot" or bV == "Bar" then
-                return bR(b1.Tone)
+            if style == "Badge" or style == "Dot" or style == "Bar" or (#stops > 0 and fraction ~= nil) then
+                return bR(effectiveTone())
             end
             return z.Text
         end
-        b1._listeners = {}
-        if type(bU.Update) == "function" then
-            local cd = math.max(tonumber(bU.UpdateRate) or 1, 0.05)
-            local ce = true
-            table.insert(b1._listeners, function()
-                ce = false
+
+        local updateRate = math.max(tonumber(options.UpdateRate) or 1, 0.05)
+        function api:SetUpdateRate(rate)
+            updateRate = math.max(tonumber(rate) or updateRate, 0.05)
+        end
+        if type(options.Update) == "function" then
+            -- pinned statuses feed the island HUD, so they keep updating while the window is closed or minimized
+            k._poll(api, card, function()
+                return updateRate
+            end, function()
+                if options.Pin or options.AlwaysUpdate == true then
+                    return not window._destroyed
+                end
+                return k._isLive(self, window, api)
+            end, function()
+                local ok, value, extra = aK(options.Update)
+                if not ok then
+                    warn("[AirFlow] status update error: " .. tostring(value))
+                    return
+                end
+                if value ~= nil then
+                    api.Value = value
+                end
+                if type(extra) == "number" then
+                    api.Max = extra
+                elseif type(extra) == "string" or typeof(extra) == "Color3" then
+                    api.Tone = extra
+                end
+                refresh(true)
             end)
-            task.spawn(function()
-                while ce and b_.Parent do
-                    local cf, cg, ch = aK(bU.Update)
-                    if cf then
-                        if cg ~= nil then
-                            b1.Value = cg
-                        end
-                        if type(ch) == "number" then
-                            b1.Max = ch
-                        elseif type(ch) == "string" or typeof(ch) == "Color3" then
-                            b1.Tone = ch
-                        end
-                        cc(true)
-                    else
-                        warn("[AirFlow] status update error: " .. tostring(cg))
+        end
+        if options.Pin then
+            table.insert(window._pinned, api)
+            table.insert(api._listeners, function()
+                local index = table.find(window._pinned, api)
+                if index then
+                    table.remove(window._pinned, index)
+                end
+            end)
+        end
+        refresh(false)
+        return m(self, options, api, card, "Status")
+    end
+    function aS:Statuses(list, defaults)
+        local result = {}
+        local methods = {}
+        function methods:Set(name, value, maximum)
+            local status = rawget(self, name)
+            if not status then
+                return false
+            end
+            status:Set(value, maximum)
+            return true
+        end
+        function methods:SetAll(values)
+            for name, value in pairs(values or {}) do
+                local status = rawget(self, name)
+                if status then
+                    status:Set(value)
+                end
+            end
+        end
+        function methods:Get(name)
+            local status = rawget(self, name)
+            return status and status:Get() or nil
+        end
+        function methods:Destroy()
+            for name, status in pairs(self) do
+                if type(status) == "table" and type(status.Destroy) == "function" then
+                    status:Destroy()
+                end
+            end
+        end
+        setmetatable(result, { __index = methods })
+        for index, entry in ipairs(list or {}) do
+            local config
+            if type(entry) == "table" then
+                config = table.clone(entry)
+                if config.Name == nil and config.Title == nil and type(config[1]) == "string" then
+                    config.Name = config[1]
+                    if config.Value == nil and config[2] ~= nil then
+                        config.Value = config[2]
                     end
-                    task.wait(cd)
                 end
-            end)
-            function b1:SetUpdateRate(cf)
-                cd = math.max(tonumber(cf) or cd, 0.05)
+            else
+                config = { Name = tostring(entry) }
             end
-        end
-        if bU.Pin then
-            table.insert(bX._pinned, b1)
-            table.insert(b1._listeners, function()
-                local cd = table.find(bX._pinned, b1)
-                if cd then
-                    table.remove(bX._pinned, cd)
-                end
-            end)
-        end
-        cc(false)
-        return m(self, bU, b1, b_, "Status")
-    end
-    function aS:Statuses(bU, bV)
-        local bW = {}
-        for bX, bY in ipairs(bU or {}) do
-            local bZ = type(bY) == "table" and table.clone(bY) or { Name = tostring(bY) }
-            for b_, b0 in pairs(bV or {}) do
-                if bZ[b_] == nil then
-                    bZ[b_] = b0
+            for key, value in pairs(defaults or {}) do
+                if config[key] == nil then
+                    config[key] = value
                 end
             end
-            local b_ = self:Status(bZ)
-            bW[bZ.Name or bZ.Title or bX] = b_
+            local status = self:Status(config)
+            local key = config.Name or config.Title or index
+            if rawget(result, key) ~= nil then
+                key = index
+            end
+            result[key] = status
         end
-        return bW
+        return result
     end
-    function aS:StatusList(bU)
-        bU = l(bU, { Title = "Name" })
-        local bV = aM(self).Compact
-        local bW = self.Window
-        local bX = math.max(math.floor(tonumber(bU.MaxRows) or 5), 1)
-        local bY = aO(self, "Frame", 0, bU)
-        bY.AutomaticSize = Enum.AutomaticSize.Y
-        if bV then
-            al(bY, 14, 14, 6, 8)
+    function aS:StatusList(options)
+        options = l(options, { Title = "Name" })
+        local compact = aM(self).Compact
+        local window = self.Window
+        local maxRows = math.max(math.floor(tonumber(options.MaxRows) or 5), 1)
+        local card = aO(self, "Frame", 0, options)
+        card.AutomaticSize = Enum.AutomaticSize.Y
+        if compact then
+            al(card, 14, 14, 6, 8)
         else
-            al(bY, 14, 14, 11, 12)
+            al(card, 14, 14, 11, 12)
         end
-        ai("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4), Parent = bY })
-        local bZ = am({
+        ai("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4), Parent = card })
+        local titleLabel = am({
             Size = UDim2.new(1, 0, 0, 16),
-            Text = string.upper(tostring(bU.Name or "")),
+            Text = string.upper(tostring(options.Name or "")),
             TextSize = 11,
             TextColor3 = z.Muted,
-            Visible = tostring(bU.Name or "") ~= "",
+            Visible = tostring(options.Name or "") ~= "",
             LayoutOrder = 1,
-            Parent = bY,
+            Parent = card,
         })
-        local b_ = ai(
-            "ScrollingFrame",
-            {
-                Size = UDim2.new(1, 0, 0, 0),
-                BackgroundTransparency = 1,
-                BorderSizePixel = 0,
-                ScrollBarThickness = 2,
-                ScrollBarImageColor3 = z.Accent,
-                ScrollBarImageTransparency = 0.4,
-                ScrollingDirection = Enum.ScrollingDirection.Y,
-                AutomaticCanvasSize = Enum.AutomaticSize.Y,
-                CanvasSize = UDim2.new(),
-                ScrollingEnabled = false,
-                LayoutOrder = 2,
-                Parent = bY,
-            }
-        )
-        b_:SetAttribute("NoDrag", true)
-        local b0 = ai(
-            "Frame",
-            { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Parent = b_ }
-        )
-        local b1 = al(b0, 0, 0, 0, 0)
-        ai("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = b0 })
-        local b2 = am({
+        local scroll = ai("ScrollingFrame", {
+            Size = UDim2.new(1, 0, 0, 0),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ScrollBarThickness = 2,
+            ScrollBarImageColor3 = z.Accent,
+            ScrollBarImageTransparency = 0.4,
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            CanvasSize = UDim2.new(),
+            ScrollingEnabled = false,
+            LayoutOrder = 2,
+            Parent = card,
+        })
+        scroll:SetAttribute("NoDrag", true)
+        local content = ai("Frame", {
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1,
+            Parent = scroll,
+        })
+        local contentPadding = al(content, 0, 0, 0, 0)
+        ai("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = content })
+        local emptyLabel = am({
             Size = UDim2.new(1, 0, 0, 24),
             AutomaticSize = Enum.AutomaticSize.Y,
-            Text = tostring(bU.EmptyText or "Nothing yet"),
+            Text = tostring(options.EmptyText or "Nothing yet"),
             TextSize = 13,
             LineHeight = 1.1,
             FontFace = D.Regular,
@@ -11511,58 +11956,58 @@ end
             TextWrapped = true,
             TextTruncate = Enum.TextTruncate.None,
             LayoutOrder = 0,
-            Parent = b0,
+            Parent = content,
         })
-        local b3, b4, b5, b6 = {}, {}, nil, {}
-        local b7 = { _listeners = {} }
-        local function b8()
-            if b7._destroyed then
+        local rowObjects, normalized, lastKey, rawRows = {}, {}, nil, {}
+        local api = { _listeners = {} }
+
+        local function fitHeight()
+            if api._destroyed then
                 return
             end
-            local b9 = bW.Scale.Scale
-            local ca = #b4
-            local cb = 0
-            if ca == 0 then
-                cb = b2.AbsoluteSize.Y / b9
+            local scale = math.max(window.Scale.Scale, 0.01)
+            local count = #normalized
+            local height = 0
+            if count == 0 then
+                height = emptyLabel.AbsoluteSize.Y / scale
             else
-                local cc = math.min(ca, bX)
-                for cd = 1, cc do
-                    cb += b3[cd].Frame.AbsoluteSize.Y / b9
+                local shown = math.min(count, maxRows)
+                for index = 1, shown do
+                    height = height + rowObjects[index].Frame.AbsoluteSize.Y / scale
                 end
-                cb += (cc - 1) * 2
+                height = height + (shown - 1) * 2
             end
-            cb = math.ceil(cb)
-            local cc = ca > bX
-            b_.ScrollingEnabled = cc
-            b1.PaddingRight = UDim.new(0, cc and 8 or 0)
-            if b_.Size.Y.Offset ~= cb then
-                b_.Size = UDim2.new(1, 0, 0, cb)
+            height = math.ceil(height)
+            local scrollable = count > maxRows
+            scroll.ScrollingEnabled = scrollable
+            contentPadding.PaddingRight = UDim.new(0, scrollable and 8 or 0)
+            if scroll.Size.Y.Offset ~= height then
+                scroll.Size = UDim2.new(1, 0, 0, height)
             end
-            local cd = math.max(b_.AbsoluteCanvasSize.Y - b_.AbsoluteWindowSize.Y, 0) / b9
-            if b_.CanvasPosition.Y > cd then
-                b_.CanvasPosition = Vector2.new(0, cd)
+            local maxScroll = math.max(scroll.AbsoluteCanvasSize.Y - scroll.AbsoluteWindowSize.Y, 0) / scale
+            if scroll.CanvasPosition.Y > maxScroll then
+                scroll.CanvasPosition = Vector2.new(0, maxScroll)
             end
         end
-        local function b9(ca)
-            if ca.Value.Visible then
-                ca.Text.Size = UDim2.new(1, -(math.ceil(ca.Value.AbsoluteSize.X / bW.Scale.Scale) + 12), 0, 24)
+        -- keeps the text clear of the right-aligned value
+        local function fitText(row)
+            local scale = math.max(window.Scale.Scale, 0.01)
+            if row.Value.Visible then
+                row.Text.Size = UDim2.new(1, -(math.ceil(row.Value.AbsoluteSize.X / scale) + 12), 0, 24)
             else
-                ca.Text.Size = UDim2.new(1, 0, 0, 24)
+                row.Text.Size = UDim2.new(1, 0, 0, 24)
             end
         end
-        local function ca(cb)
-            local cc = ai(
-                "Frame",
-                {
-                    Size = UDim2.new(1, 0, 0, 0),
-                    AutomaticSize = Enum.AutomaticSize.Y,
-                    BackgroundTransparency = 1,
-                    LayoutOrder = cb,
-                    Parent = b0,
-                }
-            )
-            local cd = {
-                Frame = cc,
+        local function createRow(order)
+            local frame = ai("Frame", {
+                Size = UDim2.new(1, 0, 0, 0),
+                AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1,
+                LayoutOrder = order,
+                Parent = content,
+            })
+            local row = {
+                Frame = frame,
                 Text = am({
                     Size = UDim2.new(1, 0, 0, 24),
                     AutomaticSize = Enum.AutomaticSize.Y,
@@ -11574,7 +12019,7 @@ end
                     TextWrapped = true,
                     TextTruncate = Enum.TextTruncate.None,
                     RichText = true,
-                    Parent = cc,
+                    Parent = frame,
                 }),
                 Value = am({
                     AnchorPoint = Vector2.new(1, 0),
@@ -11589,173 +12034,215 @@ end
                     TextXAlignment = Enum.TextXAlignment.Right,
                     TextTruncate = Enum.TextTruncate.None,
                     Visible = false,
-                    Parent = cc,
+                    Parent = frame,
                 }),
             }
-            cd.Connections = {
-                cc:GetPropertyChangedSignal("AbsoluteSize"):Connect(b8),
-                cd.Value:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-                    b9(cd)
+            row.Connections = {
+                frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitHeight),
+                row.Value:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+                    fitText(row)
                 end),
             }
-            return cd
+            return row
         end
-        local function cb(cc)
-            if type(cc) == "table" then
-                local cd = cc.Text or cc.Name or cc[1]
-                local ce = cc.Tone or cc.Color
+        -- accepts "text", { Text = "...", Value = ..., Tone = ... } and { "text", value, tone }
+        local function normalizeRow(source)
+            if type(source) == "table" then
+                local text = source.Text
+                if text == nil then
+                    text = source.Name
+                end
+                if text == nil then
+                    text = source[1]
+                end
+                local value = source.Value
+                if value == nil then
+                    value = source[2]
+                end
+                local tone = source.Tone
+                if tone == nil then
+                    tone = source.Color
+                end
+                if tone == nil then
+                    tone = source[3]
+                end
+                local valueText = nil
+                if value ~= nil then
+                    if type(value) == "number" then
+                        valueText = k._formatNumber(value, source.Decimals, source.Separator, source.Abbreviate)
+                    else
+                        valueText = tostring(value)
+                    end
+                end
                 return {
-                    Text = tostring(cd == nil and "" or cd),
-                    Value = cc.Value ~= nil and tostring(cc.Value) or nil,
-                    Tone = (type(ce) == "string" or typeof(ce) == "Color3") and ce or nil,
+                    Text = tostring(text == nil and "" or text),
+                    Value = valueText,
+                    Tone = (type(tone) == "string" or typeof(tone) == "Color3") and tone or nil,
                 }
             end
-            return { Text = tostring(cc) }
+            return { Text = tostring(source) }
         end
-        local function cc(cd)
-            return cd.Text .. "\0" .. (cd.Value or "\1") .. "\0" .. tostring(cd.Tone or "")
+        local function rowKey(row)
+            return row.Text .. "\0" .. (row.Value or "\1") .. "\0" .. tostring(row.Tone or "")
         end
-        local function cd(ce, cf)
-            local cg = cc(cf)
-            if ce.Key == cg then
+        local function paintRow(row, data)
+            local key = rowKey(data)
+            if row.Key == key then
                 return
             end
-            ce.Key = cg
-            ce.Text.Text = k._rich(cf.Text)
-            local ch = cf.Tone and k._color(cf.Tone) or nil
-            if cf.Value then
-                ce.Value.Text = k._rich(cf.Value)
-                ce.Value.Visible = true
-                ah(ce.Value, { TextColor3 = ch or z.Text }, 0)
-                ah(ce.Text, { TextColor3 = z.Muted }, 0)
+            row.Key = key
+            row.Text.Text = k._rich(data.Text)
+            local tone = data.Tone and k._color(data.Tone) or nil
+            if data.Value then
+                row.Value.Text = k._rich(data.Value)
+                row.Value.Visible = true
+                ah(row.Value, { TextColor3 = tone or z.Text }, 0)
+                ah(row.Text, { TextColor3 = z.Muted }, 0)
             else
-                ce.Value.Visible = false
-                ah(ce.Text, { TextColor3 = ch or z.Muted }, 0)
+                row.Value.Visible = false
+                ah(row.Text, { TextColor3 = tone or z.Muted }, 0)
             end
-            b9(ce)
+            fitText(row)
         end
-        local function ce(cf)
-            for cg, ch in ipairs(cf.Connections) do
-                ch:Disconnect()
+        local function destroyRow(row)
+            for index, connection in ipairs(row.Connections) do
+                connection:Disconnect()
             end
-            cf.Frame:Destroy()
+            row.Frame:Destroy()
         end
-        function b7:Set(cf)
-            if type(cf) ~= "table" or b7._destroyed then
+
+        function api:Set(rows)
+            if type(rows) ~= "table" or api._destroyed then
                 return
             end
-            local cg, ch = {}, {}
-            b6 = {}
-            for ci, cj in ipairs(cf) do
-                b6[ci] = type(cj) == "table" and table.clone(cj) or cj
-                local ck = cb(cj)
-                cg[ci] = ck
-                ch[ci] = cc(ck)
+            local fresh, keys = {}, {}
+            rawRows = {}
+            for index, source in ipairs(rows) do
+                rawRows[index] = type(source) == "table" and table.clone(source) or source
+                local data = normalizeRow(source)
+                fresh[index] = data
+                keys[index] = rowKey(data)
             end
-            local ci = table.concat(ch, "\2") .. "#" .. #cg
-            if ci == b5 then
+            local signature = table.concat(keys, "\2") .. "#" .. #fresh
+            if signature == lastKey then
                 return
             end
-            b5 = ci
-            b4 = cg
-            for cj, ck in ipairs(b4) do
-                local cl = b3[cj]
-                if not cl then
-                    cl = ca(cj)
-                    b3[cj] = cl
+            lastKey = signature
+            normalized = fresh
+            for index, data in ipairs(normalized) do
+                local row = rowObjects[index]
+                if not row then
+                    row = createRow(index)
+                    rowObjects[index] = row
                 end
-                cd(cl, ck)
+                paintRow(row, data)
             end
-            for cj = #b3, #b4 + 1, -1 do
-                ce(b3[cj])
-                b3[cj] = nil
+            for index = #rowObjects, #normalized + 1, -1 do
+                destroyRow(rowObjects[index])
+                rowObjects[index] = nil
             end
-            b2.Visible = #b4 == 0
-            b8()
+            emptyLabel.Visible = #normalized == 0
+            fitHeight()
         end
-        function b7:Get()
-            local cf = {}
-            for cg, ch in ipairs(b6) do
-                cf[cg] = type(ch) == "table" and table.clone(ch) or ch
+        api.SetRows = api.Set
+        function api:Get()
+            local copy = {}
+            for index, source in ipairs(rawRows) do
+                copy[index] = type(source) == "table" and table.clone(source) or source
             end
-            return cf
+            return copy
         end
-        function b7:Clear()
-            b7:Set({})
+        function api:Count()
+            return #normalized
         end
-        function b7:SetName(cf)
-            cf = tostring(cf or "")
-            bZ.Text = string.upper(cf)
-            bZ.Visible = cf ~= ""
-            b7._searchName = cf
-            b7._searchKey = string.lower(cf)
+        function api:Clear()
+            api:Set({})
         end
-        local cf = math.max(tonumber(bU.UpdateRate) or 1, 0.05)
-        function b7:SetUpdateRate(cg)
-            cf = math.max(tonumber(cg) or cf, 0.05)
+        function api:Add(row, position)
+            local rows = api:Get()
+            if tonumber(position) then
+                table.insert(rows, math.clamp(math.floor(position), 1, #rows + 1), row)
+            else
+                table.insert(rows, row)
+            end
+            api:Set(rows)
+            return #rows
         end
-        ag(b0, function()
-            for cg, ch in ipairs(b3) do
-                if b4[cg] then
-                    ch.Key = nil
-                    cd(ch, b4[cg])
+        -- Remove(index) or Remove("text of the row")
+        function api:Remove(target)
+            local rows = api:Get()
+            local position = nil
+            if type(target) == "number" then
+                position = rows[target] ~= nil and target or nil
+            else
+                for index, source in ipairs(rows) do
+                    if normalizeRow(source).Text == tostring(target) then
+                        position = index
+                        break
+                    end
                 end
             end
-        end)
-        local cg = b2:GetPropertyChangedSignal("AbsoluteSize"):Connect(b8)
-        table.insert(b7._listeners, function()
-            b7._destroyed = true
-            cg:Disconnect()
-            for ch, ci in ipairs(b3) do
-                for cj, ck in ipairs(ci.Connections) do
-                    ck:Disconnect()
-                end
-            end
-        end)
-        local function ch()
-            if bW._destroyed or not bW.Open or bW.Minimized or not b7._userVisible then
+            if not position then
                 return false
             end
-            local ci = self
-            if ci._groupbox then
-                if ci._userVisible == false then
-                    return false
-                end
-                ci = ci.Parent
-            end
-            if ci._isSubTab then
-                if ci.Parent.CurrentSubTab ~= ci then
-                    return false
-                end
-                ci = ci.Parent
-            end
-            return bW.CurrentTab == ci
+            table.remove(rows, position)
+            api:Set(rows)
+            return true
         end
-        if type(bU.Update) == "function" then
-            local ci = true
-            table.insert(b7._listeners, function()
-                ci = false
-            end)
-            task.defer(function()
-                local cj = true
-                while ci and bY.Parent do
-                    if cj or ch() then
-                        cj = false
-                        local ck, cl = aK(bU.Update)
-                        if ck then
-                            if cl ~= nil then
-                                b7:Set(cl)
-                            end
-                        else
-                            warn("[AirFlow] status list update error: " .. tostring(cl))
-                        end
-                    end
-                    task.wait(cf)
+        function api:SetName(text)
+            text = tostring(text or "")
+            titleLabel.Text = string.upper(text)
+            titleLabel.Visible = text ~= ""
+            api._searchName = text
+            api._searchKey = string.lower(text)
+        end
+        function api:SetEmptyText(text)
+            emptyLabel.Text = tostring(text or "")
+        end
+        function api:SetMaxRows(count)
+            maxRows = math.max(math.floor(tonumber(count) or maxRows), 1)
+            fitHeight()
+        end
+        local updateRate = math.max(tonumber(options.UpdateRate) or 1, 0.05)
+        function api:SetUpdateRate(rate)
+            updateRate = math.max(tonumber(rate) or updateRate, 0.05)
+        end
+        ag(content, function()
+            for index, row in ipairs(rowObjects) do
+                if normalized[index] then
+                    row.Key = nil
+                    paintRow(row, normalized[index])
+                end
+            end
+        end)
+        local emptyConnection = emptyLabel:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitHeight)
+        table.insert(api._listeners, function()
+            api._destroyed = true
+            emptyConnection:Disconnect()
+            for index, row in ipairs(rowObjects) do
+                for index2, connection in ipairs(row.Connections) do
+                    connection:Disconnect()
+                end
+            end
+        end)
+        if type(options.Update) == "function" then
+            k._poll(api, card, function()
+                return updateRate
+            end, function()
+                return options.AlwaysUpdate == true or k._isLive(self, window, api)
+            end, function()
+                local ok, rows = aK(options.Update)
+                if not ok then
+                    warn("[AirFlow] status list update error: " .. tostring(rows))
+                    return
+                end
+                if rows ~= nil then
+                    api:Set(rows)
                 end
             end)
         end
-        b7:Set(bU.Rows or {})
-        return m(self, bU, b7, bY, "StatusList")
+        api:Set(options.Rows or {})
+        return m(self, options, api, card, "StatusList")
     end
     aS.CreateStatus = aS.Status
     aS.AddStatus = aS.Status
@@ -12154,65 +12641,62 @@ end
         end
         return m(self, bU, b0, bV.Frame, "Viewport")
     end
-    function aS:Table(bU)
-        bU = l(bU, { Title = "Name", Description = "Desc", Data = "Rows", OnRowClick = "Callback" })
-        local bV = self.Window
-        local bW = aM(self)
-        local bX = bW.Compact
-        local bY = tonumber(bU.RowHeight) or (E and 32 or 26)
-        local bZ = math.max(math.floor(tonumber(bU.MaxRows) or 8), 1)
-        local b_ = E and 28 or 24
-        local b0 = bX and 12 or 13
-        local b1 = bX and 14 or 8
-        local b2 = type(bU.Name) == "string" and bU.Name ~= ""
-        local b3 = bX and 4 or 10
-        local b4 = bU.Search ~= false
-        local b5 = E and 30 or 26
-        local b6 = b2 and (b3 + (bU.Desc and 38 or 22)) or (bX and 4 or b1)
-        local b7 = b6 + (b4 and b5 + 6 or 0)
-        local b8 = bX and 6 or b1
-        local b9, ca = aO(self, "Frame", b7 + b_ + bY + b8, bU)
-        aG(b9, ca)
-        local cb
-        if b2 then
-            cb = am({
-                Position = UDim2.fromOffset(14, b3),
-                Size = UDim2.new(1, -28, 0, bW.TitleHeight),
-                Text = bU.Name,
-                TextSize = bW.TextSize,
-                Parent = b9,
+    function aS:Table(options)
+        options = l(options, { Title = "Name", Description = "Desc", Data = "Rows", OnRowClick = "Callback" })
+        local window = self.Window
+        local metrics = aM(self)
+        local compact = metrics.Compact
+        local rowHeight = tonumber(options.RowHeight) or (E and 32 or 26)
+        local maxRows = math.max(math.floor(tonumber(options.MaxRows) or 8), 1)
+        local headerHeight = E and 28 or 24
+        local cellTextSize = compact and 12 or 13
+        local sidePad = compact and 14 or 8
+        local hasTitle = type(options.Name) == "string" and options.Name ~= ""
+        local titleTop = compact and 4 or 10
+        local hasSearch = options.Search ~= false
+        local searchHeight = E and 30 or 26
+        local searchTop = hasTitle and (titleTop + (options.Desc and 38 or 22)) or (compact and 4 or sidePad)
+        local tableTop = searchTop + (hasSearch and (searchHeight + 6) or 0)
+        local bottomPad = compact and 6 or sidePad
+        local card, cardStroke = aO(self, "Frame", tableTop + headerHeight + rowHeight + bottomPad, options)
+        aG(card, cardStroke)
+        local titleLabel
+        if hasTitle then
+            titleLabel = am({
+                Position = UDim2.fromOffset(14, titleTop),
+                Size = UDim2.new(1, -28, 0, metrics.TitleHeight),
+                Text = options.Name,
+                TextSize = metrics.TextSize,
+                Parent = card,
             })
-            if bU.Desc then
+            if options.Desc then
                 am({
-                    Position = UDim2.fromOffset(14, b3 + bW.TitleHeight + 1),
-                    Size = UDim2.new(1, -28, 0, bW.DescLine),
-                    Text = bU.Desc,
-                    TextSize = bW.DescSize,
+                    Position = UDim2.fromOffset(14, titleTop + metrics.TitleHeight + 1),
+                    Size = UDim2.new(1, -28, 0, metrics.DescLine),
+                    Text = tostring(options.Desc),
+                    TextSize = metrics.DescSize,
                     FontFace = D.Regular,
                     TextColor3 = z.Muted,
-                    Parent = b9,
+                    Parent = card,
                 })
             end
         end
-        local cc = ""
-        local cd, ce
-        if b4 then
-            local cf = ai(
-                "Frame",
-                {
-                    Position = UDim2.fromOffset(b1, b6),
-                    Size = UDim2.new(1, -b1 * 2, 0, b5),
-                    BackgroundColor3 = z.Surface,
-                    BorderSizePixel = 0,
-                    Parent = b9,
-                }
-            )
-            cf:SetAttribute("NoDrag", true)
-            aj(cf, UDim.new(0, 6))
-            local cg = ak(cf)
-            local ch, ci = aB(cf, "search", z.Muted, UDim2.new(0, 9, 0.5, 0))
-            ch.Size = UDim2.fromOffset(13, 13)
-            ce = am({
+
+        local searchBox, countLabel
+        if hasSearch then
+            local searchFrame = ai("Frame", {
+                Position = UDim2.fromOffset(sidePad, searchTop),
+                Size = UDim2.new(1, -sidePad * 2, 0, searchHeight),
+                BackgroundColor3 = z.Surface,
+                BorderSizePixel = 0,
+                Parent = card,
+            })
+            searchFrame:SetAttribute("NoDrag", true)
+            aj(searchFrame, UDim.new(0, 6))
+            local searchStroke = ak(searchFrame)
+            local searchIconFrame, searchIcon = aB(searchFrame, "search", z.Muted, UDim2.new(0, 9, 0.5, 0))
+            searchIconFrame.Size = UDim2.fromOffset(13, 13)
+            countLabel = am({
                 AnchorPoint = Vector2.new(1, 0),
                 Position = UDim2.new(1, -9, 0, 0),
                 Size = UDim2.new(0, 0, 1, 0),
@@ -12223,665 +12707,753 @@ end
                 TextColor3 = z.Muted,
                 TextTruncate = Enum.TextTruncate.None,
                 Visible = false,
-                Parent = cf,
+                Parent = searchFrame,
             })
-            cd = ai(
-                "TextBox",
-                {
-                    Position = UDim2.fromOffset(29, 0),
-                    Size = UDim2.new(1, -90, 1, 0),
-                    BackgroundTransparency = 1,
-                    Text = "",
-                    PlaceholderText = bU.SearchPlaceholder or "Search",
-                    PlaceholderColor3 = z.Muted,
-                    TextColor3 = z.Text,
-                    TextSize = 12,
-                    FontFace = D.Regular,
-                    TextXAlignment = Enum.TextXAlignment.Left,
-                    TextTruncate = Enum.TextTruncate.AtEnd,
-                    ClearTextOnFocus = false,
-                    Parent = cf,
-                }
-            )
-            cd.Focused:Connect(function()
-                ah(cg, { Color = z.StrokeHover }, 0.15)
-                ah(ci, { ImageColor3 = z.Accent }, 0.15)
+            searchBox = ai("TextBox", {
+                Position = UDim2.fromOffset(29, 0),
+                Size = UDim2.new(1, -90, 1, 0),
+                BackgroundTransparency = 1,
+                Text = "",
+                PlaceholderText = options.SearchPlaceholder or "Search",
+                PlaceholderColor3 = z.Muted,
+                TextColor3 = z.Text,
+                TextSize = 12,
+                FontFace = D.Regular,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                ClearTextOnFocus = false,
+                Parent = searchFrame,
+            })
+            searchBox.Focused:Connect(function()
+                ah(searchStroke, { Color = z.StrokeHover }, 0.15)
+                ah(searchIcon, { ImageColor3 = z.Accent }, 0.15)
             end)
-            cd.FocusLost:Connect(function()
-                ah(cg, { Color = z.Stroke }, 0.2)
-                ah(ci, { ImageColor3 = z.Muted }, 0.2)
+            searchBox.FocusLost:Connect(function()
+                ah(searchStroke, { Color = z.Stroke }, 0.2)
+                ah(searchIcon, { ImageColor3 = z.Muted }, 0.2)
             end)
         end
-        local cf = ai(
-            "Frame",
-            {
-                Position = UDim2.fromOffset(b1, b7),
-                Size = UDim2.new(1, -b1 * 2, 0, b_ + bY),
-                BackgroundColor3 = z.Surface,
-                BackgroundTransparency = 0.2,
-                BorderSizePixel = 0,
-                ClipsDescendants = true,
-                Parent = b9,
-            }
-        )
-        aj(cf, UDim.new(0, 6))
-        ak(cf, z.Stroke)
-        local cg = ai(
-            "Frame",
-            {
-                Size = UDim2.new(1, 0, 0, b_),
-                BackgroundColor3 = z.Surface3,
-                BackgroundTransparency = 0.45,
-                BorderSizePixel = 0,
-                Parent = cf,
-            }
-        )
-        ai(
-            "Frame",
-            {
-                AnchorPoint = Vector2.new(0, 1),
-                Position = UDim2.fromScale(0, 1),
-                Size = UDim2.new(1, 0, 0, 1),
-                BackgroundColor3 = z.Stroke,
-                BorderSizePixel = 0,
-                Parent = cg,
-            }
-        )
-        local ch = ai(
-            "ScrollingFrame",
-            {
-                Position = UDim2.fromOffset(0, b_),
-                Size = UDim2.new(1, 0, 1, -b_),
-                BackgroundTransparency = 1,
-                BorderSizePixel = 0,
-                ScrollBarThickness = 2,
-                ScrollBarImageColor3 = z.Accent,
-                ScrollBarImageTransparency = 0.4,
-                ScrollingDirection = Enum.ScrollingDirection.Y,
-                AutomaticCanvasSize = Enum.AutomaticSize.Y,
-                CanvasSize = UDim2.new(),
-                Parent = cf,
-            }
-        )
-        ai("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Parent = ch })
-        local ci = am({
-            Position = UDim2.fromOffset(0, b_),
-            Size = UDim2.new(1, 0, 0, bY),
-            Text = bU.EmptyText or "Nothing here yet",
+
+        local tableFrame = ai("Frame", {
+            Position = UDim2.fromOffset(sidePad, tableTop),
+            Size = UDim2.new(1, -sidePad * 2, 0, headerHeight + rowHeight),
+            BackgroundColor3 = z.Surface,
+            BackgroundTransparency = 0.2,
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+            Parent = card,
+        })
+        aj(tableFrame, UDim.new(0, 6))
+        ak(tableFrame, z.Stroke)
+        local headerFrame = ai("Frame", {
+            Size = UDim2.new(1, 0, 0, headerHeight),
+            BackgroundColor3 = z.Surface3,
+            BackgroundTransparency = 0.45,
+            BorderSizePixel = 0,
+            Parent = tableFrame,
+        })
+        ai("Frame", {
+            AnchorPoint = Vector2.new(0, 1),
+            Position = UDim2.fromScale(0, 1),
+            Size = UDim2.new(1, 0, 0, 1),
+            BackgroundColor3 = z.Stroke,
+            BorderSizePixel = 0,
+            Parent = headerFrame,
+        })
+        -- Rows are virtualized: only the rows in (or just next to) the viewport exist as instances,
+        -- positioned by hand inside a fixed-height canvas, so big data sets stay cheap.
+        local scroll = ai("ScrollingFrame", {
+            Position = UDim2.fromOffset(0, headerHeight),
+            Size = UDim2.new(1, 0, 1, -headerHeight),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ScrollBarThickness = 2,
+            ScrollBarImageColor3 = z.Accent,
+            ScrollBarImageTransparency = 0.4,
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+            AutomaticCanvasSize = Enum.AutomaticSize.None,
+            CanvasSize = UDim2.new(),
+            Parent = tableFrame,
+        })
+        local emptyLabel = am({
+            Position = UDim2.fromOffset(0, headerHeight),
+            Size = UDim2.new(1, 0, 0, rowHeight),
+            Text = tostring(options.EmptyText or "Nothing here yet"),
             TextSize = 12,
             FontFace = D.Regular,
             TextColor3 = z.Muted,
             TextXAlignment = Enum.TextXAlignment.Center,
-            Parent = cf,
+            Parent = tableFrame,
         })
-        local cj = { Rows = {} }
-        local ck = nil
-        local cl, cm = {}, {}
-        local cn = {}
-        local co, cp = nil, false
-        local cq = nil
-        local cr = { Color3.fromRGB(245, 200, 90), Color3.fromRGB(200, 206, 218), Color3.fromRGB(214, 146, 96) }
-        local function cs(ct)
-            local cu = type(ct.Align) == "string" and ct.Align:lower() or nil
-            if cu == "right" then
+
+        local api = { Rows = {}, _listeners = {} }
+        local columns = {}
+        local headerCells = {}
+        local pool = {}
+        local poolSize = maxRows + 2
+        local view = {}
+        local viewVersion = 0
+        local lastFirst = nil
+        local lastCardHeight = nil
+        local searchQuery = ""
+        local sortColumn, sortDescending = nil, false
+        local searchCache = setmetatable({}, { __mode = "k" })
+        local medalColors = { Color3.fromRGB(245, 200, 90), Color3.fromRGB(200, 206, 218), Color3.fromRGB(214, 146, 96) }
+        local rebuildView
+
+        local function alignmentOf(column)
+            local align = type(column.Align) == "string" and column.Align:lower() or nil
+            if align == "right" then
                 return Enum.TextXAlignment.Right
-            elseif cu == "center" or cu == "centre" then
+            elseif align == "center" or align == "centre" then
                 return Enum.TextXAlignment.Center
             end
             return Enum.TextXAlignment.Left
         end
-        local function ct()
-            local cu, cv, cw = 0, 0, 0
-            for cx, cy in ipairs(cl) do
-                local cz = tonumber(cy.Width)
-                if cz and cz > 1 then
-                    cu += cz
-                elseif cz and cz > 0 then
-                    cv += cz
+        -- Width > 1: pixels, 0 < Width <= 1: share of what the fixed columns leave, nil: split what is left evenly
+        local function layoutColumns()
+            local fixed, fractions, flexible = 0, 0, 0
+            for index, column in ipairs(columns) do
+                local width = tonumber(column.Width)
+                if width and width > 1 then
+                    fixed = fixed + width
+                elseif width and width > 0 then
+                    fractions = fractions + width
                 else
-                    cw += 1
+                    flexible = flexible + 1
                 end
             end
-            local cx = math.max(1 - cv, 0)
-            for cy, cz in ipairs(cl) do
-                local cA = tonumber(cz.Width)
-                local cB
-                if cA and cA > 1 then
-                    cz.UDim = UDim.new(0, cA)
+            local remaining = math.max(1 - fractions, 0)
+            for index, column in ipairs(columns) do
+                local width = tonumber(column.Width)
+                if width and width > 1 then
+                    column.UDim = UDim.new(0, width)
                 else
-                    cB = (cA and cA > 0) and cA or (cw > 0 and cx / cw or 0)
-                    cz.UDim = UDim.new(cB, -cu * cB)
+                    local share = (width and width > 0) and width or (flexible > 0 and remaining / flexible or 0)
+                    column.UDim = UDim.new(share, -fixed * share)
                 end
             end
         end
-        local function cu(cv, cw)
-            if cw.Rank then
+        local function cellValue(row, column)
+            if column.Rank then
                 return nil
             end
-            if cv[1] ~= nil or cw.Key == nil then
-                return cv[cw.Index]
+            if row[1] ~= nil or column.Key == nil then
+                return row[column.Index]
             end
-            return cv[cw.Key]
+            return row[column.Key]
         end
-        local function cv(cw, cx, cy)
-            if type(cx.Format) == "function" then
-                local cz, cA = pcall(cx.Format, cw, cy)
-                if cz and cA ~= nil then
-                    return tostring(cA)
+        local function formatCell(value, column, row)
+            if type(column.Format) == "function" then
+                local ok, result = pcall(column.Format, value, row)
+                if ok and result ~= nil then
+                    return tostring(result)
                 end
             end
-            if type(cw) == "number" then
-                local cz = cw == math.floor(cw)
-                local cA = cz and string.format("%d", cw) or string.format("%.2f", cw)
-                local cB, cC, cD = cA:match("^(%-?)(%d+)(.*)$")
-                if cC then
-                    cC = cC:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
-                    return cB .. cC .. cD
-                end
-                return cA
+            if type(value) == "number" then
+                return k._formatNumber(value, nil, true, false)
             end
-            if cw == nil then
+            if value == nil then
                 return ""
             end
-            return tostring(cw)
+            return tostring(value)
         end
-        local function cw()
-            for cx, cy in ipairs(cm) do
-                local cz = cy.Column
-                local cA = co ~= nil and co == cz
-                ah(cy.Label, { TextColor3 = cA and z.Text or z.Muted }, 0.15)
-                cy.Arrow.Visible = cA
-                if cA then
-                    ah(cy.Arrow, { Rotation = cp and 0 or 180 }, 0.2, Enum.EasingStyle.Quint)
-                end
+        local function findColumn(target)
+            if type(target) == "number" then
+                return columns[target + (options.Rank and 1 or 0)]
             end
-        end
-        local function cx()
-            local cy = {}
-            for cz, cA in ipairs(cj.Rows) do
-                cy[cz] = { Row = cA, Index = cz }
-            end
-            if co then
-                local cz = co
-                table.sort(cy, function(cA, cB)
-                    local cC, cD = cu(cA.Row, cz), cu(cB.Row, cz)
-                    local cE, cF = tonumber(cC), tonumber(cD)
-                    if cE and cF then
-                        if cE ~= cF then
-                            if cp then
-                                return cE > cF
-                            end
-                            return cE < cF
-                        end
-                    elseif cC ~= nil and cD ~= nil then
-                        local cG, cH = string.lower(tostring(cC)), string.lower(tostring(cD))
-                        if cG ~= cH then
-                            if cp then
-                                return cG > cH
-                            end
-                            return cG < cH
-                        end
-                    elseif cC ~= cD then
-                        return cC ~= nil
-                    end
-                    return cA.Index < cB.Index
-                end)
-            end
-            for cz, cA in ipairs(cy) do
-                cA.Rank = cz
-            end
-            if cc == "" then
-                return cy
-            end
-            local cz = {}
-            for cA, cB in ipairs(cy) do
-                for cC, cD in ipairs(cl) do
-                    if not cD.Rank then
-                        local cE = cv(cu(cB.Row, cD), cD, cB.Row)
-                        cE = string.lower((string.gsub(cE, "<[^>]->", "")))
-                        if string.find(cE, cc, 1, true) then
-                            table.insert(cz, cB)
-                            break
-                        end
-                    end
-                end
-            end
-            return cz
-        end
-        local function cy()
-            local cz = ai(
-                "TextButton",
-                {
-                    Size = UDim2.new(1, 0, 0, bY),
-                    BackgroundColor3 = z.Surface3,
-                    BackgroundTransparency = 1,
-                    BorderSizePixel = 0,
-                    AutoButtonColor = false,
-                    Text = "",
-                    Parent = ch,
-                }
-            )
-            local cA = ai(
-                "Frame",
-                {
-                    Position = UDim2.new(0, 3, 0.5, 0),
-                    AnchorPoint = Vector2.new(0, 0.5),
-                    Size = UDim2.new(0, 2, 1, -10),
-                    BackgroundColor3 = z.Accent,
-                    BackgroundTransparency = 1,
-                    BorderSizePixel = 0,
-                    Parent = cz,
-                }
-            )
-            aj(cA, UDim.new(1, 0))
-            local cB = ai("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Parent = cz })
-            al(cB, 10, 10)
-            ai(
-                "UIListLayout",
-                {
-                    FillDirection = Enum.FillDirection.Horizontal,
-                    VerticalAlignment = Enum.VerticalAlignment.Center,
-                    SortOrder = Enum.SortOrder.LayoutOrder,
-                    Parent = cB,
-                }
-            )
-            local cC = { Frame = cz, Marker = cA, Cells = {}, Hover = false }
-            for cD, cE in ipairs(cl) do
-                local cF = ai(
-                    "Frame",
-                    {
-                        Size = UDim2.new(cE.UDim.Scale, cE.UDim.Offset, 1, 0),
-                        BackgroundTransparency = 1,
-                        LayoutOrder = cD,
-                        Parent = cB,
-                    }
-                )
-                local cG = am({
-                    Size = UDim2.new(1, -6, 1, 0),
-                    TextSize = b0,
-                    FontFace = cE.Rank and D.Bold or D.Regular,
-                    TextColor3 = z.Text,
-                    TextXAlignment = cs(cE),
-                    RichText = not cE.Rank,
-                    Parent = cF,
-                })
-                local cH
-                if cE.Rank then
-                    cG.Size = UDim2.fromScale(1, 1)
-                    cG.TextXAlignment = Enum.TextXAlignment.Center
-                    cH = ai(
-                        "Frame",
-                        {
-                            AnchorPoint = Vector2.new(0.5, 0.5),
-                            Position = UDim2.fromScale(0.5, 0.5),
-                            Size = UDim2.fromOffset(bY - 8, bY - 8),
-                            BackgroundTransparency = 1,
-                            BorderSizePixel = 0,
-                            ZIndex = 0,
-                            Parent = cF,
-                        }
-                    )
-                    aj(cH, UDim.new(1, 0))
-                end
-                cC.Cells[cD] = { Label = cG, Badge = cH }
-            end
-            local cD = ay(cz, function()
-                return ch
-            end)
-            cz.MouseEnter:Connect(function()
-                cC.Hover = true
-                ah(cz, { BackgroundTransparency = 0.35 }, 0.1)
-            end)
-            cz.MouseLeave:Connect(function()
-                cC.Hover = false
-                ah(
-                    cz,
-                    { BackgroundColor3 = cC.Highlighted and z.Accent or z.Surface3, BackgroundTransparency = cC.Rest
-                        or 1 },
-                    0.2
-                )
-            end)
-            cz.MouseButton1Click:Connect(function()
-                if cC.Data and cD() then
-                    aJ(bU.Callback, cC.Data, cC.Index)
-                end
-            end)
-            return cC
-        end
-        local function cz(cA)
-            local cB = ck or #cj.Rows
-            local cC = math.clamp(cB, 1, bZ)
-            local cD = b_ + cC * bY
-            local cE = b7 + cD + b8
-            if cq == cE then
-                return
-            end
-            local cF = (cA or cq == nil) and 0 or 0.25
-            cq = cE
-            ah(cf, { Size = UDim2.new(1, -b1 * 2, 0, cD) }, cF, Enum.EasingStyle.Quint)
-            ah(b9, { Size = UDim2.new(1, 0, 0, cE) }, cF, Enum.EasingStyle.Quint)
-        end
-        local function cA()
-            local cB = cx()
-            for cC, cD in ipairs(cB) do
-                local cE = cn[cC]
-                if not cE then
-                    cE = cy()
-                    cn[cC] = cE
-                end
-                local cF = cD.Row
-                cE.Data = cF
-                cE.Index = cD.Index
-                cE.Frame.LayoutOrder = cC
-                cE.Frame.Visible = true
-                local cG = cF.Highlight == true
-                if not cG and type(bU.Highlight) == "function" then
-                    local cH, cI = pcall(bU.Highlight, cF, cD.Index)
-                    cG = cH and cI == true
-                end
-                cE.Highlighted = cG
-                cE.Rest = cG and 0.86 or (cC % 2 == 0 and 0.78 or 1)
-                if not cE.Hover then
-                    cE.Frame.BackgroundColor3 = cG and z.Accent or z.Surface3
-                    cE.Frame.BackgroundTransparency = cE.Rest
-                    aa(cE.Frame, { BackgroundColor3 = cE.Frame.BackgroundColor3 })
-                end
-                cE.Marker.BackgroundTransparency = cG and 0 or 1
-                for cH, cI in ipairs(cl) do
-                    local cJ = cE.Cells[cH]
-                    if cI.Rank then
-                        local cK = cr[cD.Rank]
-                        cJ.Label.Text = tostring(cD.Rank)
-                        cJ.Label.TextColor3 = cK and Color3.fromRGB(28, 22, 18) or z.Muted
-                        aa(cJ.Label, { TextColor3 = cJ.Label.TextColor3 })
-                        cJ.Badge.BackgroundColor3 = cK or z.Surface3
-                        cJ.Badge.BackgroundTransparency = cK and 0.05 or 1
-                    else
-                        local cK = cu(cF, cI)
-                        cJ.Label.Text = k._rich(cv(cK, cI, cF))
-                        local cL = cI.Color
-                        if type(cL) == "function" then
-                            local cM, cN = pcall(cL, cK, cF)
-                            cL = cM and cN or nil
-                        end
-                        if type(cF.Colors) == "table" then
-                            local cM = cF.Colors[cI.Key or cI.Index]
-                            if cM == nil then
-                                cM = cF.Colors[cI.Index]
-                            end
-                            if cM ~= nil then
-                                cL = cM
-                            end
-                        end
-                        local cM = k._color(cL) or (cG and z.Accent or z.Text)
-                        cJ.Label.TextColor3 = cM
-                        aa(cJ.Label, { TextColor3 = cM })
-                    end
-                end
-            end
-            for cC = #cB + 1, #cn do
-                cn[cC].Frame.Visible = false
-                cn[cC].Data = nil
-            end
-            ck = #cB
-            ci.Visible = #cB == 0
-            ci.Text = (#cB == 0 and cc ~= "" and #cj.Rows > 0) and (bU.NoMatchText or "No rows match")
-                or (bU.EmptyText or "Nothing here yet")
-            if ce then
-                ce.Visible = cc ~= ""
-                ce.Text = #cB .. " / " .. #cj.Rows
-            end
-            cz()
-        end
-        local function cB()
-            for cC, cD in ipairs(cm) do
-                cD.Frame:Destroy()
-            end
-            table.clear(cm)
-            for cC, cD in ipairs(cn) do
-                cD.Frame:Destroy()
-            end
-            table.clear(cn)
-            local cC = cg:FindFirstChild("Cells")
-                or ai(
-                    "Frame",
-                    { Name = "Cells", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Parent = cg }
-                )
-            if not cC:FindFirstChildOfClass("UIListLayout") then
-                al(cC, 10, 10)
-                ai(
-                    "UIListLayout",
-                    {
-                        FillDirection = Enum.FillDirection.Horizontal,
-                        VerticalAlignment = Enum.VerticalAlignment.Center,
-                        SortOrder = Enum.SortOrder.LayoutOrder,
-                        Parent = cC,
-                    }
-                )
-            end
-            for cD, cE in ipairs(cl) do
-                local cF = ai(
-                    "TextButton",
-                    {
-                        Size = UDim2.new(cE.UDim.Scale, cE.UDim.Offset, 1, 0),
-                        BackgroundTransparency = 1,
-                        AutoButtonColor = false,
-                        Text = "",
-                        LayoutOrder = cD,
-                        Parent = cC,
-                    }
-                )
-                local cG = cE.Rank and Enum.TextXAlignment.Center or cs(cE)
-                local cH = cG == Enum.TextXAlignment.Right
-                local cI = am({
-                    Size = UDim2.new(1, cG == Enum.TextXAlignment.Center and 0 or -16, 1, 0),
-                    Position = UDim2.fromOffset(cH and 16 or 0, 0),
-                    Text = string.upper(cE.Name),
-                    TextSize = 11,
-                    FontFace = D.Bold,
-                    TextColor3 = z.Muted,
-                    TextXAlignment = cG,
-                    Parent = cF,
-                })
-                local cJ = ai(
-                    "ImageLabel",
-                    {
-                        AnchorPoint = Vector2.new(0, 0.5),
-                        Position = UDim2.new(0, 0, 0.5, 0),
-                        Size = UDim2.fromOffset(12, 12),
-                        BackgroundTransparency = 1,
-                        ImageColor3 = z.Accent,
-                        ScaleType = Enum.ScaleType.Fit,
-                        Visible = false,
-                        Parent = cF,
-                    }
-                )
-                aq(cJ, "chevron-down")
-                local function cK()
-                    local cL = cI.TextBounds.X
-                    if cH then
-                        cJ.Position = UDim2.new(1, -(cL + 15), 0.5, 0)
-                    elseif cG == Enum.TextXAlignment.Center then
-                        cJ.Position = UDim2.new(0.5, cL / 2 + 3, 0.5, 0)
-                    else
-                        local cM = cF.AbsoluteSize.X / math.max(bV.Scale.Scale, 0.01)
-                        cJ.Position = UDim2.new(0, math.clamp(cL + 4, 0, math.max(cM - 12, 0)), 0.5, 0)
-                    end
-                end
-                cI:GetPropertyChangedSignal("TextBounds"):Connect(cK)
-                cF:GetPropertyChangedSignal("AbsoluteSize"):Connect(cK)
-                task.defer(cK)
-                local cL = cE.Sortable and not cE.Rank
-                if cL then
-                    cF.MouseEnter:Connect(function()
-                        if co ~= cE then
-                            ah(cI, { TextColor3 = z.Text }, 0.12)
-                        end
-                    end)
-                    cF.MouseLeave:Connect(function()
-                        if co ~= cE then
-                            ah(cI, { TextColor3 = z.Muted }, 0.2)
-                        end
-                    end)
-                    cF.MouseButton1Click:Connect(function()
-                        if co ~= cE then
-                            local cM = false
-                            for cN, cO in ipairs(cj.Rows) do
-                                local cP = cu(cO, cE)
-                                if cP ~= nil then
-                                    cM = tonumber(cP) ~= nil
-                                    break
-                                end
-                            end
-                            co, cp = cE, cM
-                            cE.FirstDescending = cM
-                        elseif cp == cE.FirstDescending then
-                            cp = not cp
-                        else
-                            co = nil
-                        end
-                        cw()
-                        cA()
-                    end)
-                end
-                table.insert(cm, { Frame = cF, Label = cI, Arrow = cJ, Column = cE })
-            end
-            cw()
-        end
-        function cj:SetColumns(cC)
-            table.clear(cl)
-            if bU.Rank then
-                table.insert(cl, { Name = "#", Rank = true, Width = E and 40 or 36, Sortable = false })
-            end
-            for cD, cE in ipairs(type(cC) == "table" and cC or {}) do
-                if type(cE) ~= "table" then
-                    cE = { Name = tostring(cE) }
-                end
-                local cF = cE.Name or cE.Title or ("Column " .. cD)
-                table.insert(
-                    cl,
-                    {
-                        Name = cF,
-                        Key = cE.Key or cF,
-                        Index = cD,
-                        Width = cE.Width,
-                        Align = cE.Align,
-                        Format = cE.Format,
-                        Color = cE.Color,
-                        Sortable = cE.Sortable ~= false and bU.Sortable ~= false,
-                    }
-                )
-            end
-            co = nil
-            ct()
-            cB()
-            cA()
-        end
-        local function cC(cD)
-            if type(cD) == "number" then
-                return cl[cD + (bU.Rank and 1 or 0)]
-            end
-            for cE, cF in ipairs(cl) do
-                if not cF.Rank and (cF.Key == cD or cF.Name == cD) then
-                    return cF
+            for index, column in ipairs(columns) do
+                if not column.Rank and (column.Key == target or column.Name == target) then
+                    return column
                 end
             end
             return nil
         end
-        function cj:SetRows(cD)
-            cj.Rows = {}
-            for cE, cF in ipairs(type(cD) == "table" and cD or {}) do
-                cj.Rows[cE] = type(cF) == "table" and cF or { cF }
-            end
-            cA()
+        local function invalidateSearch()
+            searchCache = setmetatable({}, { __mode = "k" })
         end
-        cj.Set = cj.SetRows
-        function cj:GetRows()
-            return cj.Rows
-        end
-        cj.Get = cj.GetRows
-        function cj:AddRow(cD, cE)
-            cD = type(cD) == "table" and cD or { cD }
-            if tonumber(cE) then
-                table.insert(cj.Rows, math.clamp(math.floor(cE), 1, #cj.Rows + 1), cD)
-            else
-                table.insert(cj.Rows, cD)
+        local function searchTextOf(row)
+            local cached = searchCache[row]
+            if cached then
+                return cached
             end
-            cA()
-            return #cj.Rows
-        end
-        function cj:UpdateRow(cD, cE)
-            if not cj.Rows[cD] then
-                return false
+            local parts = {}
+            for index, column in ipairs(columns) do
+                if not column.Rank then
+                    local text = formatCell(cellValue(row, column), column, row)
+                    parts[#parts + 1] = string.lower((string.gsub(text, "<[^>]->", "")))
+                end
             end
-            cj.Rows[cD] = type(cE) == "table" and cE or { cE }
-            cA()
-            for cF, cG in ipairs(cn) do
-                if cG.Index == cD and cG.Frame.Visible then
-                    local cH = cG.Highlighted and z.Accent or z.Surface3
-                    ah(cG.Frame, { BackgroundColor3 = z.Accent, BackgroundTransparency = 0.7 }, 0.08)
+            cached = table.concat(parts, "\n")
+            searchCache[row] = cached
+            return cached
+        end
+        -- numbers sort before text, text before empty cells; empty cells stay last in both directions
+        local function sortKeyOf(row, column)
+            local raw = cellValue(row, column)
+            if raw == nil then
+                return 3, nil
+            end
+            local number = tonumber(raw)
+            if number ~= nil and number == number then
+                return 1, number
+            end
+            return 2, string.lower(tostring(raw))
+        end
+        local function computeView()
+            local entries = {}
+            for index, row in ipairs(api.Rows) do
+                entries[index] = { Row = row, Index = index }
+            end
+            if sortColumn then
+                for index, entry in ipairs(entries) do
+                    entry.TypeRank, entry.SortKey = sortKeyOf(entry.Row, sortColumn)
+                end
+                local descending = sortDescending
+                table.sort(entries, function(left, right)
+                    if left.TypeRank ~= right.TypeRank then
+                        return left.TypeRank < right.TypeRank
+                    end
+                    if left.TypeRank ~= 3 and left.SortKey ~= right.SortKey then
+                        if descending then
+                            return left.SortKey > right.SortKey
+                        end
+                        return left.SortKey < right.SortKey
+                    end
+                    return left.Index < right.Index
+                end)
+            end
+            -- rank follows the sort order but ignores the search filter
+            for position, entry in ipairs(entries) do
+                entry.Rank = position
+            end
+            if searchQuery == "" then
+                return entries
+            end
+            local matches = {}
+            for index, entry in ipairs(entries) do
+                if string.find(searchTextOf(entry.Row), searchQuery, 1, true) then
+                    matches[#matches + 1] = entry
+                end
+            end
+            return matches
+        end
+
+        local function updateHeaderStyle()
+            for index, cell in ipairs(headerCells) do
+                local sorted = sortColumn ~= nil and sortColumn == cell.Column
+                ah(cell.Label, { TextColor3 = sorted and z.Text or z.Muted }, 0.15)
+                cell.Arrow.Visible = sorted
+                if sorted then
+                    ah(cell.Arrow, { Rotation = sortDescending and 0 or 180 }, 0.2, Enum.EasingStyle.Quint)
+                end
+            end
+        end
+        local function buildHeader()
+            for index, cell in ipairs(headerCells) do
+                cell.Frame:Destroy()
+            end
+            table.clear(headerCells)
+            local container = headerFrame:FindFirstChild("Cells")
+                or ai("Frame", { Name = "Cells", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Parent = headerFrame })
+            if not container:FindFirstChildOfClass("UIListLayout") then
+                al(container, 10, 10)
+                ai("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal,
+                    VerticalAlignment = Enum.VerticalAlignment.Center,
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                    Parent = container,
+                })
+            end
+            for columnIndex, column in ipairs(columns) do
+                local button = ai("TextButton", {
+                    Size = UDim2.new(column.UDim.Scale, column.UDim.Offset, 1, 0),
+                    BackgroundTransparency = 1,
+                    AutoButtonColor = false,
+                    Text = "",
+                    LayoutOrder = columnIndex,
+                    Parent = container,
+                })
+                local alignment = column.Rank and Enum.TextXAlignment.Center or alignmentOf(column)
+                local rightAligned = alignment == Enum.TextXAlignment.Right
+                local label = am({
+                    Size = UDim2.new(1, alignment == Enum.TextXAlignment.Center and 0 or -16, 1, 0),
+                    Position = UDim2.fromOffset(rightAligned and 16 or 0, 0),
+                    Text = string.upper(tostring(column.Name)),
+                    TextSize = 11,
+                    FontFace = D.Bold,
+                    TextColor3 = z.Muted,
+                    TextXAlignment = alignment,
+                    Parent = button,
+                })
+                local arrow = ai("ImageLabel", {
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    Position = UDim2.new(0, 0, 0.5, 0),
+                    Size = UDim2.fromOffset(12, 12),
+                    BackgroundTransparency = 1,
+                    ImageColor3 = z.Accent,
+                    ScaleType = Enum.ScaleType.Fit,
+                    Visible = false,
+                    Parent = button,
+                })
+                aq(arrow, "chevron-down")
+                local function placeArrow()
+                    local textWidth = label.TextBounds.X
+                    if rightAligned then
+                        arrow.Position = UDim2.new(1, -(textWidth + 15), 0.5, 0)
+                    elseif alignment == Enum.TextXAlignment.Center then
+                        arrow.Position = UDim2.new(0.5, textWidth / 2 + 3, 0.5, 0)
+                    else
+                        local cellWidth = button.AbsoluteSize.X / math.max(window.Scale.Scale, 0.01)
+                        arrow.Position = UDim2.new(0, math.clamp(textWidth + 4, 0, math.max(cellWidth - 12, 0)), 0.5, 0)
+                    end
+                end
+                label:GetPropertyChangedSignal("TextBounds"):Connect(placeArrow)
+                button:GetPropertyChangedSignal("AbsoluteSize"):Connect(placeArrow)
+                task.defer(placeArrow)
+                if column.Sortable and not column.Rank then
+                    button.MouseEnter:Connect(function()
+                        if sortColumn ~= column then
+                            ah(label, { TextColor3 = z.Text }, 0.12)
+                        end
+                    end)
+                    button.MouseLeave:Connect(function()
+                        if sortColumn ~= column then
+                            ah(label, { TextColor3 = z.Muted }, 0.2)
+                        end
+                    end)
+                    -- click cycle: first direction (numbers high to low, text A to Z) -> reversed -> unsorted
+                    button.MouseButton1Click:Connect(function()
+                        if sortColumn ~= column then
+                            local numeric = false
+                            for index, row in ipairs(api.Rows) do
+                                local value = cellValue(row, column)
+                                if value ~= nil then
+                                    numeric = tonumber(value) ~= nil
+                                    break
+                                end
+                            end
+                            sortColumn, sortDescending = column, numeric
+                            column.FirstDescending = numeric
+                        elseif sortDescending == column.FirstDescending then
+                            sortDescending = not sortDescending
+                        else
+                            sortColumn = nil
+                        end
+                        updateHeaderStyle()
+                        rebuildView()
+                    end)
+                end
+                table.insert(headerCells, { Frame = button, Label = label, Arrow = arrow, Column = column })
+            end
+            updateHeaderStyle()
+        end
+
+        local function createSlot()
+            local button = ai("TextButton", {
+                Size = UDim2.new(1, 0, 0, rowHeight),
+                BackgroundColor3 = z.Surface3,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                AutoButtonColor = false,
+                Text = "",
+                Parent = scroll,
+            })
+            local marker = ai("Frame", {
+                Position = UDim2.new(0, 3, 0.5, 0),
+                AnchorPoint = Vector2.new(0, 0.5),
+                Size = UDim2.new(0, 2, 1, -10),
+                BackgroundColor3 = z.Accent,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Parent = button,
+            })
+            aj(marker, UDim.new(1, 0))
+            local cellsFrame = ai("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Parent = button })
+            al(cellsFrame, 10, 10)
+            ai("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
+                VerticalAlignment = Enum.VerticalAlignment.Center,
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Parent = cellsFrame,
+            })
+            local slot = { Frame = button, Marker = marker, Cells = {}, Hover = false }
+            for columnIndex, column in ipairs(columns) do
+                local cellFrame = ai("Frame", {
+                    Size = UDim2.new(column.UDim.Scale, column.UDim.Offset, 1, 0),
+                    BackgroundTransparency = 1,
+                    LayoutOrder = columnIndex,
+                    Parent = cellsFrame,
+                })
+                local label = am({
+                    Size = UDim2.new(1, -6, 1, 0),
+                    TextSize = cellTextSize,
+                    FontFace = column.Rank and D.Bold or D.Regular,
+                    TextColor3 = z.Text,
+                    TextXAlignment = alignmentOf(column),
+                    RichText = not column.Rank,
+                    Parent = cellFrame,
+                })
+                local badge
+                if column.Rank then
+                    label.Size = UDim2.fromScale(1, 1)
+                    label.TextXAlignment = Enum.TextXAlignment.Center
+                    badge = ai("Frame", {
+                        AnchorPoint = Vector2.new(0.5, 0.5),
+                        Position = UDim2.fromScale(0.5, 0.5),
+                        Size = UDim2.fromOffset(rowHeight - 8, rowHeight - 8),
+                        BackgroundTransparency = 1,
+                        BorderSizePixel = 0,
+                        ZIndex = 0,
+                        Parent = cellFrame,
+                    })
+                    aj(badge, UDim.new(1, 0))
+                end
+                slot.Cells[columnIndex] = { Label = label, Badge = badge }
+            end
+            local canClick = ay(button, function()
+                return scroll
+            end)
+            local function setHover(on)
+                if slot.Hover == on then
+                    return
+                end
+                slot.Hover = on
+                if on then
+                    ah(button, { BackgroundTransparency = 0.35 }, 0.1)
+                else
+                    ah(button, {
+                        BackgroundColor3 = slot.Highlighted and z.Accent or z.Surface3,
+                        BackgroundTransparency = slot.Rest or 1,
+                    }, 0.2)
+                end
+            end
+            button.MouseEnter:Connect(function()
+                setHover(true)
+            end)
+            button.MouseMoved:Connect(function()
+                setHover(true)
+            end)
+            button.MouseLeave:Connect(function()
+                setHover(false)
+            end)
+            button.MouseButton1Click:Connect(function()
+                if slot.Data and canClick() then
+                    aJ(options.Callback, slot.Data, slot.Index)
+                end
+            end)
+            return slot
+        end
+        local function bindSlot(slot, entry, viewIndex)
+            local row = entry.Row
+            slot.Data = row
+            slot.Index = entry.Index
+            slot.BoundIndex = viewIndex
+            slot.BoundVersion = viewVersion
+            slot.Frame.Position = UDim2.fromOffset(0, (viewIndex - 1) * rowHeight)
+            slot.Frame.Visible = true
+            local highlighted = row.Highlight == true
+            if not highlighted and type(options.Highlight) == "function" then
+                local ok, result = pcall(options.Highlight, row, entry.Index)
+                highlighted = ok and result == true
+            end
+            slot.Highlighted = highlighted
+            slot.Rest = highlighted and 0.86 or (viewIndex % 2 == 0 and 0.78 or 1)
+            slot.Hover = false
+            ah(slot.Frame, {
+                BackgroundColor3 = highlighted and z.Accent or z.Surface3,
+                BackgroundTransparency = slot.Rest,
+            }, 0)
+            slot.Marker.BackgroundTransparency = highlighted and 0 or 1
+            for columnIndex, column in ipairs(columns) do
+                local cell = slot.Cells[columnIndex]
+                if column.Rank then
+                    local medal = medalColors[entry.Rank]
+                    cell.Label.Text = tostring(entry.Rank)
+                    ah(cell.Label, { TextColor3 = medal and Color3.fromRGB(28, 22, 18) or z.Muted }, 0)
+                    ah(cell.Badge, {
+                        BackgroundColor3 = medal or z.Surface3,
+                        BackgroundTransparency = medal and 0.05 or 1,
+                    }, 0)
+                else
+                    local value = cellValue(row, column)
+                    cell.Label.Text = k._rich(formatCell(value, column, row))
+                    local colorSpec = column.Color
+                    if type(colorSpec) == "function" then
+                        local ok, result = pcall(colorSpec, value, row)
+                        colorSpec = ok and result or nil
+                    end
+                    if type(row.Colors) == "table" then
+                        local override = row.Colors[column.Key or column.Index]
+                        if override == nil then
+                            override = row.Colors[column.Index]
+                        end
+                        if override ~= nil then
+                            colorSpec = override
+                        end
+                    end
+                    ah(cell.Label, { TextColor3 = k._color(colorSpec) or (highlighted and z.Accent or z.Text) }, 0)
+                end
+            end
+        end
+        local function resetPool()
+            for index, slot in ipairs(pool) do
+                slot.Frame:Destroy()
+            end
+            pool = {}
+            poolSize = maxRows + 2
+            lastFirst = nil
+        end
+        local function renderRows(force)
+            local count = #view
+            local first = math.clamp(math.floor(scroll.CanvasPosition.Y / rowHeight) + 1, 1, math.max(count, 1))
+            if not force and first == lastFirst then
+                return
+            end
+            lastFirst = first
+            for slotNumber = 1, poolSize do
+                local viewIndex = first + ((slotNumber - first) % poolSize)
+                local slot = pool[slotNumber]
+                if viewIndex <= count then
+                    if not slot then
+                        slot = createSlot()
+                        pool[slotNumber] = slot
+                    end
+                    if force or slot.BoundIndex ~= viewIndex or slot.BoundVersion ~= viewVersion then
+                        bindSlot(slot, view[viewIndex], viewIndex)
+                    end
+                elseif slot then
+                    slot.Frame.Visible = false
+                    slot.Data = nil
+                    slot.BoundIndex = nil
+                end
+            end
+        end
+        local function updateLayout(instant)
+            local count = #view
+            local visibleRows = math.clamp(count, 1, maxRows)
+            local tableHeight = headerHeight + visibleRows * rowHeight
+            local cardHeight = tableTop + tableHeight + bottomPad
+            scroll.CanvasSize = UDim2.fromOffset(0, count * rowHeight)
+            local maxScroll = math.max(count - visibleRows, 0) * rowHeight
+            if scroll.CanvasPosition.Y > maxScroll then
+                scroll.CanvasPosition = Vector2.new(0, maxScroll)
+            end
+            if lastCardHeight == cardHeight then
+                return
+            end
+            local duration = (instant or lastCardHeight == nil) and 0 or 0.25
+            lastCardHeight = cardHeight
+            ah(tableFrame, { Size = UDim2.new(1, -sidePad * 2, 0, tableHeight) }, duration, Enum.EasingStyle.Quint)
+            ah(card, { Size = UDim2.new(1, 0, 0, cardHeight) }, duration, Enum.EasingStyle.Quint)
+        end
+        function rebuildView()
+            view = computeView()
+            viewVersion = viewVersion + 1
+            emptyLabel.Visible = #view == 0
+            emptyLabel.Text = (#view == 0 and searchQuery ~= "" and #api.Rows > 0) and tostring(options.NoMatchText or "No rows match")
+                or tostring(options.EmptyText or "Nothing here yet")
+            if countLabel then
+                countLabel.Visible = searchQuery ~= ""
+                countLabel.Text = #view .. " / " .. #api.Rows
+            end
+            updateLayout(false)
+            renderRows(true)
+        end
+        scroll:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+            renderRows(false)
+        end)
+        local function flashRow(rowIndex)
+            for index, slot in ipairs(pool) do
+                if slot.Index == rowIndex and slot.Frame.Visible then
+                    local restColor = slot.Highlighted and z.Accent or z.Surface3
+                    ah(slot.Frame, { BackgroundColor3 = z.Accent, BackgroundTransparency = 0.7 }, 0.08)
                     task.delay(0.1, function()
-                        if not cG.Hover then
-                            ah(cG.Frame, { BackgroundColor3 = cH, BackgroundTransparency = cG.Rest }, 0.5)
+                        if not slot.Hover and slot.Frame.Parent then
+                            ah(slot.Frame, { BackgroundColor3 = restColor, BackgroundTransparency = slot.Rest }, 0.5)
                         end
                     end)
                     break
                 end
             end
-            return true
         end
-        function cj:RemoveRow(cD)
-            if not cj.Rows[cD] then
+
+        function api:SetColumns(newColumns)
+            table.clear(columns)
+            if options.Rank then
+                table.insert(columns, { Name = "#", Rank = true, Width = E and 40 or 36, Sortable = false })
+            end
+            for index, entry in ipairs(type(newColumns) == "table" and newColumns or {}) do
+                if type(entry) ~= "table" then
+                    entry = { Name = tostring(entry) }
+                end
+                local name = entry.Name or entry.Title or ("Column " .. index)
+                table.insert(columns, {
+                    Name = name,
+                    Key = entry.Key or name,
+                    Index = index,
+                    Width = entry.Width,
+                    Align = entry.Align,
+                    Format = entry.Format,
+                    Color = entry.Color,
+                    Sortable = entry.Sortable ~= false and options.Sortable ~= false,
+                })
+            end
+            sortColumn = nil
+            layoutColumns()
+            buildHeader()
+            resetPool()
+            invalidateSearch()
+            rebuildView()
+        end
+        function api:SetRows(newRows)
+            api.Rows = {}
+            for index, row in ipairs(type(newRows) == "table" and newRows or {}) do
+                api.Rows[index] = type(row) == "table" and row or { row }
+            end
+            invalidateSearch()
+            rebuildView()
+        end
+        api.Set = api.SetRows
+        function api:GetRows()
+            return api.Rows
+        end
+        api.Get = api.GetRows
+        function api:Count()
+            return #api.Rows
+        end
+        -- rows in the order they are shown right now (sorted and filtered)
+        function api:GetView()
+            local shown = {}
+            for index, entry in ipairs(view) do
+                shown[index] = entry.Row
+            end
+            return shown
+        end
+        function api:Refresh()
+            invalidateSearch()
+            rebuildView()
+        end
+        function api:AddRow(row, position)
+            row = type(row) == "table" and row or { row }
+            if tonumber(position) then
+                table.insert(api.Rows, math.clamp(math.floor(position), 1, #api.Rows + 1), row)
+            else
+                table.insert(api.Rows, row)
+            end
+            invalidateSearch()
+            rebuildView()
+            return #api.Rows
+        end
+        function api:AddRows(list)
+            for index, row in ipairs(type(list) == "table" and list or {}) do
+                table.insert(api.Rows, type(row) == "table" and row or { row })
+            end
+            invalidateSearch()
+            rebuildView()
+            return #api.Rows
+        end
+        function api:UpdateRow(rowIndex, row)
+            if not api.Rows[rowIndex] then
                 return false
             end
-            table.remove(cj.Rows, cD)
-            cA()
+            api.Rows[rowIndex] = type(row) == "table" and row or { row }
+            invalidateSearch()
+            rebuildView()
+            flashRow(rowIndex)
             return true
         end
-        function cj:Clear()
-            cj:SetRows({})
-        end
-        function cj:Sort(cD, cE)
-            co = cD ~= nil and cC(cD) or nil
-            cp = cE == true
-            if co then
-                co.FirstDescending = cp
+        function api:UpdateCell(rowIndex, columnTarget, value)
+            local row = api.Rows[rowIndex]
+            local column = findColumn(columnTarget)
+            if not row or not column then
+                return false
             end
-            cw()
-            cA()
+            if row[1] ~= nil or column.Key == nil then
+                row[column.Index] = value
+            else
+                row[column.Key] = value
+            end
+            invalidateSearch()
+            rebuildView()
+            flashRow(rowIndex)
+            return true
         end
-        function cj:SetTitle(cD)
-            if cb then
-                cb.Text = tostring(cD)
+        function api:FindRow(predicate)
+            for index, row in ipairs(api.Rows) do
+                local ok, matched = pcall(predicate, row, index)
+                if ok and matched then
+                    return index, row
+                end
+            end
+            return nil
+        end
+        function api:RemoveRow(rowIndex)
+            if not api.Rows[rowIndex] then
+                return false
+            end
+            table.remove(api.Rows, rowIndex)
+            invalidateSearch()
+            rebuildView()
+            return true
+        end
+        function api:Clear()
+            api:SetRows({})
+        end
+        function api:Sort(columnTarget, descending)
+            sortColumn = columnTarget ~= nil and findColumn(columnTarget) or nil
+            sortDescending = descending == true
+            if sortColumn then
+                sortColumn.FirstDescending = sortDescending
+            end
+            updateHeaderStyle()
+            rebuildView()
+        end
+        function api:SetTitle(text)
+            if titleLabel then
+                titleLabel.Text = tostring(text)
             end
         end
-        function cj:SetMaxRows(cD)
-            bZ = math.max(math.floor(tonumber(cD) or bZ), 1)
-            cz()
+        function api:SetEmptyText(text)
+            options.EmptyText = text
+            rebuildView()
         end
-        cj:SetColumns(bU.Columns or {})
-        cj:SetRows(bU.Rows or {})
-        if bU.SortBy ~= nil then
-            cj:Sort(bU.SortBy, bU.SortDescending ~= false)
+        function api:SetHighlight(callback)
+            options.Highlight = callback
+            renderRows(true)
         end
-        cz(true)
-        if cd then
-            cd:GetPropertyChangedSignal("Text"):Connect(function()
-                local cD = string.lower(bM(cd.Text))
-                if cD ~= cc then
-                    cc = cD
-                    ch.CanvasPosition = Vector2.zero
-                    cA()
+        function api:SetMaxRows(count)
+            maxRows = math.max(math.floor(tonumber(count) or maxRows), 1)
+            resetPool()
+            updateLayout(false)
+            renderRows(true)
+        end
+        function api:SetSearch(text)
+            if searchBox then
+                searchBox.Text = tostring(text or "")
+            end
+        end
+
+        api:SetColumns(options.Columns or {})
+        api:SetRows(options.Rows or {})
+        if options.SortBy ~= nil then
+            api:Sort(options.SortBy, options.SortDescending ~= false)
+        end
+        updateLayout(true)
+        if searchBox then
+            searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+                local query = string.lower(bM(searchBox.Text))
+                if query ~= searchQuery then
+                    searchQuery = query
+                    scroll.CanvasPosition = Vector2.zero
+                    rebuildView()
                 end
             end)
         end
-        function cj:SetSearch(cD)
-            if cd then
-                cd.Text = tostring(cD or "")
-            end
-        end
-        ag(cf, cA)
-        return m(self, bU, cj, b9, "Table")
+        ag(tableFrame, function()
+            renderRows(true)
+        end)
+        return m(self, options, api, card, "Table")
     end
     aS.CreateImage = aS.Image
     aS.AddImage = aS.Image
