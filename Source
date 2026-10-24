@@ -18940,6 +18940,15 @@ end
             return self.MiniBar
         end
         local cb = self.Gui
+        local IslandX = { queue = {}, ready = false, busy = false, readyGen = 0 }
+        function IslandX.wide()
+            local sw = cb.AbsoluteSize.X
+            if sw <= 0 then
+                return b7.Wide
+            end
+            return math.clamp(sw - 20, 260, b7.Wide)
+        end
+        IslandX.lastWide = IslandX.wide()
         local cc = ai(
             "CanvasGroup",
             {
@@ -18961,6 +18970,26 @@ end
         local cf = ai("NumberValue", { Value = 1 })
         local cg
         self._miniOrb = cc
+        do
+            local rim = ai("Frame", {
+                Name = "Rim",
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.fromScale(0.5, 0.5),
+                Size = UDim2.new(1, -2, 1, -2),
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                ZIndex = 5,
+                Parent = cc,
+            })
+            IslandX.rimCorner = k._fixedCorner(rim, UDim.new(0, math.max(b7.Height / 2 - 1, 0)))
+            IslandX.rim = ak(rim, Color3.fromRGB(255, 255, 255), 0.9, 1)
+        end
+        function IslandX.rimTo(color, transparency, t)
+            ah(IslandX.rim, { Color = color, Transparency = transparency }, t or 0.3, Enum.EasingStyle.Quad)
+        end
+        function IslandX.rimReset(t)
+            IslandX.rimTo(Color3.fromRGB(255, 255, 255), 0.9, t)
+        end
         local function ch(ci)
             return ai(
                 "CanvasGroup",
@@ -18968,7 +18997,7 @@ end
                     Name = ci,
                     AnchorPoint = Vector2.new(0.5, 0),
                     Position = UDim2.fromScale(0.5, 0),
-                    Size = UDim2.new(0, b7.Wide, 0, 400),
+                    Size = UDim2.new(0, IslandX.wide(), 0, 400),
                     BackgroundTransparency = 1,
                     GroupTransparency = 1,
                     Parent = cc,
@@ -19409,7 +19438,7 @@ end
             }
         )
         ai("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 1), Parent = cX })
-        local cY = am({ Size = UDim2.new(1, 0, 0, 18), TextSize = 14, FontFace = D.Bold, LayoutOrder = 1, Parent = cX })
+        local cY = am({ Size = UDim2.new(1, -34, 0, 18), TextSize = 14, FontFace = D.Bold, LayoutOrder = 1, Parent = cX })
         local cZ = am({
             Size = UDim2.new(1, 0, 0, 0),
             AutomaticSize = Enum.AutomaticSize.Y,
@@ -19423,6 +19452,46 @@ end
             LayoutOrder = 2,
             Parent = cX,
         })
+        do
+            local holder = ai(
+                "Frame",
+                { Size = UDim2.new(1, 0, 0, 8), BackgroundTransparency = 1, LayoutOrder = 3, Parent = cX }
+            )
+            local track = ai(
+                "Frame",
+                {
+                    AnchorPoint = Vector2.new(0, 1),
+                    Position = UDim2.fromScale(0, 1),
+                    Size = UDim2.new(1, 0, 0, 3),
+                    BackgroundColor3 = Color3.fromRGB(38, 38, 42),
+                    BorderSizePixel = 0,
+                    Parent = holder,
+                }
+            )
+            aj(track, UDim.new(1, 0))
+            IslandX.pgFill = ai(
+                "Frame",
+                {
+                    Size = UDim2.fromScale(0, 1),
+                    BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+                    BorderSizePixel = 0,
+                    Parent = track,
+                }
+            )
+            aj(IslandX.pgFill, UDim.new(1, 0))
+            IslandX.badge = am({
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, 0, 0, 1),
+                Size = UDim2.fromOffset(34, 16),
+                Text = "",
+                TextSize = 11,
+                FontFace = D.Bold,
+                TextColor3 = z.Muted,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Visible = false,
+                Parent = cU,
+            })
+        end
         local c_ = ai(
             "TextButton",
             { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 10, Parent = cc }
@@ -19438,9 +19507,9 @@ end
         local dd = false
         local function de(df)
             if df == "Expanded" then
-                return Vector2.new(b7.Wide, math.floor(ct.AbsoluteSize.Y + 28 + 0.5)), b7.Radius
+                return Vector2.new(IslandX.wide(), math.floor(ct.AbsoluteSize.Y + 28 + 0.5)), b7.Radius
             elseif df == "Activity" then
-                return Vector2.new(b7.Wide, math.floor(math.max(cU.AbsoluteSize.Y, 34) + 26 + 0.5)), b7.Radius
+                return Vector2.new(IslandX.wide(), math.floor(math.max(cU.AbsoluteSize.Y, 34) + 26 + 0.5)), b7.Radius
             end
             return Vector2.new(b7.Width, b7.Height), b7.Height / 2
         end
@@ -19506,6 +19575,7 @@ end
                 dt and Enum.EasingStyle.Back or Enum.EasingStyle.Quint
             )
             c4 = ah(cd, { CornerRadius = UDim.new(0, dp) }, du, Enum.EasingStyle.Quint)
+            ah(IslandX.rimCorner, { CornerRadius = UDim.new(0, math.max(dp - 1, 0)) }, du, Enum.EasingStyle.Quint)
             if dq and not dm and not c6 and not da then
                 ce.Scale = dt and 0.96 or 1.03
                 ah(ce, { Scale = 1 }, dt and 0.55 or 0.4, Enum.EasingStyle.Back)
@@ -19585,6 +19655,7 @@ end
             dc += 1
             ce.Scale = 1
             dk("Compact", true)
+            IslandX.reset()
             local dm = Vector2.new(b7.Width, b7.Height)
             local dn = di(dm)
             return Vector2.new(dn.X - dm.X / 2, dn.Y), dm
@@ -19620,6 +19691,9 @@ end
             task.delay(c1 == "Expanded" and 0.28 or 0.1, function()
                 if c7 == dm and not c5 and self.Minimized then
                     dl()
+                    task.delay(0.3, function()
+                        IslandX.pump()
+                    end)
                 end
             end)
         end)
@@ -19651,6 +19725,16 @@ end
             end
             local dp = di(Vector2.new(b7.Width, b7.Height), c9 + dn)
             local dq = cb.AbsoluteSize
+            if math.abs(dp.X - dq.X / 2) < 14 then
+                if not IslandX.snapped then
+                    IslandX.snapped = true
+                    ce.Scale = 1.1
+                    ah(ce, { Scale = 1.06 }, 0.25, Enum.EasingStyle.Back)
+                end
+                dp = Vector2.new(dq.X / 2, dp.Y)
+            else
+                IslandX.snapped = false
+            end
             self._islandAnchor = Vector2.new(dp.X / math.max(dq.X, 1), dp.Y / math.max(dq.Y, 1))
             if dg then
                 dg:Cancel()
@@ -19683,14 +19767,40 @@ end
                     task.delay(0.1, function()
                         if self.Minimized and not da then
                             dl()
+                            task.delay(0.3, function()
+                                IslandX.pump()
+                            end)
                         end
                     end)
                 end
             end)
         )
+        ct:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+            if c1 == "Expanded" and cc.Visible and not da and self.Minimized then
+                if math.abs(de("Expanded").Y - cc.Size.Y.Offset) > 1 then
+                    dk("Expanded")
+                end
+            end
+        end)
+        cU:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+            if c1 == "Activity" and cc.Visible and not da and self.Minimized then
+                if math.abs(de("Activity").Y - cc.Size.Y.Offset) > 1 then
+                    dk("Activity")
+                end
+            end
+        end)
         table.insert(
             self._connections,
             cb:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+                local nw = IslandX.wide()
+                if nw ~= IslandX.lastWide then
+                    IslandX.lastWide = nw
+                    cs.Size = UDim2.new(0, nw, 0, 400)
+                    cT.Size = UDim2.new(0, nw, 0, 400)
+                    if cc.Visible and not da and c1 ~= "Compact" then
+                        dk(c1, true)
+                    end
+                end
                 if cc.Visible and not da then
                     dj(Vector2.new(cc.Size.X.Offset, cc.Size.Y.Offset), 0)
                 end
@@ -19710,51 +19820,190 @@ end
             c8, da = nil, false
             dc += 1
             ce.Scale = 1
+            IslandX.clear()
             task.delay(0.15, function()
                 if not self.Minimized then
                     dk("Compact", true)
                 end
             end)
         end
-        self._islandActivity = function(dm)
-            if not self.Minimized or not cc.Visible then
-                return
+        function IslandX.badgeUpdate()
+            local n = #IslandX.queue
+            IslandX.badge.Visible = n > 0
+            IslandX.badge.Text = "+" .. n
+        end
+        function IslandX.title(item)
+            if item.Count > 1 then
+                return string.format("%s  ×%d", item.Title, item.Count)
             end
-            local dn = a1[dm.Type] or z.Accent
-            cY.Text = tostring(dm.Title or "Notification")
-            cY.TextColor3 = a1[dm.Type] or z.Text
-            cZ.Text = tostring(dm.Content or "")
-            cZ.Visible = cZ.Text ~= ""
-            local dp = dm.Icon
-            if dp == nil then
-                dp = ({ Success = "circle-check", Warning = "triangle-alert", Error = "circle-x" })[dm.Type] or "bell"
+            return item.Title
+        end
+        function IslandX.readTime(item)
+            local d = item.Duration
+            local dur
+            if d and d > 0 then
+                dur = math.clamp(d, 1.5, 6)
+            else
+                dur = math.clamp(2.2 + #item.Content / 30 + #item.Title / 60, 2.6, 6)
             end
-            aq(cW, dp)
-            if not cW:GetAttribute("CustomIcon") then
-                cW.ImageColor3 = dn
+            if #IslandX.queue > 0 then
+                dur = math.max(1.8, dur * 0.65)
             end
-            cV.BackgroundColor3 = dn
-            dd = true
+            return math.floor(dur * 10 + 0.5) / 10
+        end
+        function IslandX.arm(dur, tint)
             dc += 1
-            local dq = dc
+            local gen = dc
+            IslandX.pgFill.BackgroundColor3 = tint
+            IslandX.pgFill.Size = UDim2.fromScale(1, 1)
+            ah(IslandX.pgFill, { Size = UDim2.fromScale(0, 1) }, dur, Enum.EasingStyle.Linear)
+            task.delay(dur, function()
+                IslandX.finish(gen)
+            end)
+            return gen
+        end
+        function IslandX.show(item, chained)
+            local tint = a1[item.Type] or z.Accent
+            IslandX.current = item
+            IslandX.busy = true
+            cY.Text = IslandX.title(item)
+            cY.TextColor3 = a1[item.Type] or z.Text
+            cZ.Text = item.Content
+            cZ.Visible = item.Content ~= ""
+            local icon = item.Icon
+            if icon == nil then
+                icon = ({ Success = "circle-check", Warning = "triangle-alert", Error = "circle-x" })[item.Type] or "bell"
+            end
+            aq(cW, icon)
+            if not cW:GetAttribute("CustomIcon") then
+                cW.ImageColor3 = tint
+            end
+            cV.BackgroundColor3 = tint
+            IslandX.rimTo(tint, 0.55, 0.3)
+            IslandX.badgeUpdate()
+            dd = true
+            IslandX.arm(IslandX.readTime(item), tint)
+            if chained then
+                cY.TextTransparency = 1
+                cZ.TextTransparency = 1
+                cW.ImageTransparency = 1
+                ah(cY, { TextTransparency = 0 }, 0.22, Enum.EasingStyle.Quad)
+                ah(cZ, { TextTransparency = 0 }, 0.22, Enum.EasingStyle.Quad)
+                ah(cW, { ImageTransparency = 0 }, 0.22, Enum.EasingStyle.Quad)
+            end
             task.defer(function()
-                if dc == dq and not c5 and not da then
-                    dk("Activity")
+                if IslandX.current ~= item or c5 or da then
+                    return
+                end
+                local fresh = c1 ~= "Activity"
+                dk("Activity")
+                if fresh then
                     ce.Scale = 0.96
                     ah(ce, { Scale = 1 }, 0.4, Enum.EasingStyle.Back)
                 end
             end)
-            task.delay(math.clamp(tonumber(dm.Duration) or 3, 1.5, 5), function()
-                if dc == dq then
-                    dd = false
-                    if self.Minimized and not c5 then
-                        dl()
-                    end
+        end
+        function IslandX.pump(chained)
+            if IslandX.busy or not IslandX.ready or c5 or da then
+                return
+            end
+            if not self.Minimized or self._destroyed or not cc.Visible then
+                return
+            end
+            local item = table.remove(IslandX.queue, 1)
+            if item then
+                IslandX.show(item, chained)
+            end
+        end
+        function IslandX.finish(gen)
+            if gen and dc ~= gen then
+                return
+            end
+            IslandX.busy = false
+            IslandX.current = nil
+            dd = false
+            if not self.Minimized or self._destroyed then
+                return
+            end
+            if #IslandX.queue > 0 and IslandX.ready and not c5 and not da then
+                IslandX.pump(true)
+            else
+                IslandX.rimReset(0.4)
+                if not c5 then
+                    dl()
+                end
+            end
+        end
+        function IslandX.reset()
+            IslandX.busy = false
+            IslandX.current = nil
+            IslandX.ready = false
+            IslandX.readyGen += 1
+            local g = IslandX.readyGen
+            IslandX.rimReset(0)
+            task.delay(0.55, function()
+                if IslandX.readyGen == g and self.Minimized and not self._destroyed then
+                    IslandX.ready = true
+                    IslandX.pump()
                 end
             end)
         end
+        function IslandX.clear()
+            IslandX.queue = {}
+            IslandX.busy = false
+            IslandX.current = nil
+            IslandX.ready = false
+            IslandX.readyGen += 1
+            IslandX.badgeUpdate()
+            IslandX.rimReset(0)
+        end
+        self._islandClear = function()
+            IslandX.queue = {}
+            IslandX.badgeUpdate()
+        end
+        self._islandActivity = function(n)
+            if not self.Minimized or not cc.Visible then
+                return
+            end
+            local item = {
+                Type = n.Type,
+                Title = tostring(n.Title or "Notification"),
+                Content = tostring(n.Content or ""),
+                Icon = n.Icon,
+                Duration = tonumber(n.Duration),
+                Count = 1,
+            }
+            local function same(o)
+                return o ~= nil and o.Type == item.Type and o.Title == item.Title and o.Content == item.Content
+            end
+            local cur = IslandX.current
+            if IslandX.busy and same(cur) then
+                cur.Count += 1
+                cY.Text = IslandX.title(cur)
+                IslandX.arm(IslandX.readTime(cur), a1[cur.Type] or z.Accent)
+                if c1 == "Activity" and not c5 and not da then
+                    ce.Scale = 1.04
+                    ah(ce, { Scale = 1 }, 0.35, Enum.EasingStyle.Back)
+                end
+                return
+            end
+            local last = IslandX.queue[#IslandX.queue]
+            if same(last) then
+                last.Count += 1
+                return
+            end
+            table.insert(IslandX.queue, item)
+            while #IslandX.queue > 5 do
+                table.remove(IslandX.queue, 1)
+            end
+            IslandX.badgeUpdate()
+            IslandX.pump()
+        end
         local dm = 0
         self:_listen("Render", function()
+            if cc.Visible and c1 == "Compact" then
+                cq.BackgroundTransparency = 0.14 + 0.14 * math.sin(os.clock() * 2.6)
+            end
             if cc.Visible and dm > 0 and c1 == "Compact" then
                 local dn = os.clock()
                 for dp, dq in ipairs(co) do
@@ -20092,6 +20341,11 @@ end
                 ca(self, cl, cm, 0.22)
             end
         end)
+    end
+    function a2:ClearIslandQueue()
+        if self._islandClear then
+            self._islandClear()
+        end
     end
     function a2:SetIslandDraggable(cb)
         self._islandLocked = cb == false
