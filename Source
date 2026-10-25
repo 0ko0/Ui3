@@ -5604,10 +5604,14 @@ local a = (function()
                 a7:SetAutoSave(true, a8.AutoSaveInterval)
             end
         end
-        if a8.AutoLoad == true then
+        if a8.AutoLoad ~= false then
             task.defer(function()
-                if not a7._destroyed then
-                    a7:LoadAutoload()
+                if a7._destroyed or not a7:GetAutoload() then
+                    return
+                end
+                local loaded, loadErr = a7:LoadAutoload()
+                if not loaded then
+                    warn("[AirFlow] autoload failed: " .. tostring(loadErr))
                 end
             end)
         end
