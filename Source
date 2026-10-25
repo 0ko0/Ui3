@@ -8440,10 +8440,17 @@ end
         if not bq then
             return false, "no config name"
         end
-        local br, bs = bo(self, bq, bh(self))
+        local data = bh(self)
+        local br, bs = bo(self, bq, data)
         if br then
             self.ConfigName = bq
-            self._snapshotStale = true
+            local snapOk, snap = pcall(a2._stable, data)
+            if snapOk then
+                self._savedSnapshot = snap
+                self._snapshotStale = false
+            else
+                self._snapshotStale = true
+            end
         end
         return br, bs
     end
@@ -8608,7 +8615,13 @@ end
         return not isfolder(br)
     end
     function a2:ClearWorkspace()
-        local br = bq(self.ConfigFolder)
+        local folder = tostring(self.ConfigFolder or "")
+        local safeFolder = folder ~= ""
+            and folder ~= "."
+            and not folder:find("%.%.")
+            and not folder:find("^[/\\]")
+            and not folder:find(":")
+        local br = safeFolder and bq(folder) or false
         self.LoadedConfig = nil
         self.ConfigName = nil
         self._savedSnapshot = nil
@@ -8714,7 +8727,8 @@ end
     end
     local function bu(bv, bw)
         if bw == "Account" then
-            return bv.ConfigFolder .. "/autoload_" .. tostring(j and j.UserId or 0) .. ".txt"
+            local plr = j or f.LocalPlayer
+            return bv.ConfigFolder .. "/autoload_" .. tostring(plr and plr.UserId or 0) .. ".txt"
         end
         return bv.ConfigFolder .. "/autoload.txt"
     end
@@ -8722,10 +8736,18 @@ end
         return self:_readConfigSettings().AutoloadMode == "Account" and "Account" or "Global"
     end
     function a2:GetAutoload(bv)
-        if bv then
-            return br(bu(self, bv))
+        local function readName(mode)
+            local raw = br(bu(self, mode))
+            raw = raw and raw:match("^%s*(.-)%s*$")
+            if raw and bi(raw) then
+                return raw
+            end
+            return nil
         end
-        return br(bu(self, "Account")) or br(bu(self, "Global"))
+        if bv then
+            return readName(bv)
+        end
+        return readName("Account") or readName("Global")
     end
     function a2:SetAutoload(bv, bw)
         if not ba() then
@@ -10593,7 +10615,7 @@ end
                 bR:SetAutoloadMode(b0 == "This account" and "Account" or "Global")
             end,
         })
-        bP:Toggle({
+        local autoSaveToggle = bP:Toggle({
             Name = "Auto-save",
             Default = bQ:GetAutoSave(),
             Callback = function(enabled)
@@ -10630,7 +10652,7 @@ end
         function bR:Refresh()
             local b1 = bQ:ListConfigs()
             local b2 = bS:Get()
-            bS:Refresh(b1, true)
+            bS:Refresh(b1, true, true)
             if b2 and not table.find(b1, b2) then
                 bS:Set(bQ.LoadedConfig and table.find(b1, bQ.LoadedConfig) and bQ.LoadedConfig or nil, true)
             end
@@ -10648,6 +10670,10 @@ end
             end
             if not bi(b2) then
                 bV(false, "Invalid name", 'Up to 64 characters, none of \\ / : * ? " < > |')
+                return
+            end
+            if bQ:ConfigExists(b2) then
+                bV(false, "Create failed", b2 .. " already exists. Select it and press Save to overwrite")
                 return
             end
             local b3, b4 = bQ:SaveConfig(b2)
@@ -10768,6 +10794,12 @@ end
                     bS:Set(nil, true)
                     bR:Refresh()
                     bU:Set("All accounts", true)
+                    if bQ:GetAutoSave() then
+                        bQ:SetAutoSave(false)
+                    end
+                    if autoSaveToggle then
+                        autoSaveToggle:Set(false, true)
+                    end
                     bV(
                         b2,
                         b2 and "Settings reset" or "Reset incomplete",
@@ -10846,6 +10878,9 @@ end
                 end
             elseif not bi(b5) then
                 bV(false, "Invalid name", 'Up to 64 characters, none of \\ / : * ? " < > |')
+                return
+            elseif bQ:ConfigExists(b5) then
+                bV(false, "Import failed", b5 .. " already exists. Pick another name")
                 return
             end
             local function b6()
