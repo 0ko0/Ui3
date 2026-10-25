@@ -5604,14 +5604,21 @@ local a = (function()
                 a7:SetAutoSave(true, a8.AutoSaveInterval)
             end
         end
-        if a8.AutoLoad ~= false then
+        local autoLoadOpt = a8.AutoLoad
+        if autoLoadOpt == nil then autoLoadOpt = a8.Autoload end
+        if autoLoadOpt == nil then autoLoadOpt = a8.autoLoad end
+        if a8.Enabled ~= false and autoLoadOpt ~= false then
             task.defer(function()
-                if a7._destroyed or not a7:GetAutoload() then
+                if a7._destroyed then
                     return
                 end
-                local loaded, loadErr = a7:LoadAutoload()
-                if not loaded then
-                    warn("[AirFlow] autoload failed: " .. tostring(loadErr))
+                task.wait(0.08) -- Cho phép các Tabs & Toggles đăng ký cờ (Flags) hoàn tất
+                local autoName = a7:GetAutoload() or (a7.ConfigName and a7:ConfigExists(a7.ConfigName) and a7.ConfigName)
+                if autoName then
+                    local loaded, loadErr = a7:LoadConfig(autoName)
+                    if not loaded then
+                        warn("[AirFlow] autoload failed: " .. tostring(loadErr))
+                    end
                 end
             end)
         end
@@ -6219,6 +6226,23 @@ local a = (function()
             return a4:Dialog(a3)
         end
     end
+    function k:LoadAutoload(...)
+        local a4 = k.Windows[#k.Windows]
+        if a4 then return a4:LoadAutoload(...) end
+        return false, "no active window"
+    end
+    function k:LoadConfig(...)
+        local a4 = k.Windows[#k.Windows]
+        if a4 then return a4:LoadConfig(...) end
+        return false, "no active window"
+    end
+    function k:SaveConfig(...)
+        local a4 = k.Windows[#k.Windows]
+        if a4 then return a4:SaveConfig(...) end
+        return false, "no active window"
+    end
+    k.LoadConfiguration = k.LoadAutoload
+    a2.LoadConfiguration = a2.LoadAutoload
     local function a3(a4, a5, a6)
         local a7 = a4
         while a7 and a7 ~= a5 and a7:IsA("GuiObject") do
@@ -8150,25 +8174,63 @@ end
             end
         end)
     end
+    local genv = (typeof(getgenv) == "function" and getgenv()) or _G or {}
+    local safe_writefile = writefile or (syn and syn.write_file) or genv.writefile
+    local safe_readfile = readfile or (syn and syn.read_file) or genv.readfile
+    local safe_isfile = isfile or is_file or fileExists or file_exists or genv.isfile
+    local safe_isfolder = isfolder or is_folder or folderExists or folder_exists or genv.isfolder
+    local safe_makefolder = makefolder or make_folder or createfolder or create_folder or genv.makefolder
+    local safe_delfile = delfile or deletefile or delete_file or removefile or remove_file or (genv and (genv.delfile or genv.deletefile))
+    local safe_listfiles = listfiles or list_files or listdir or list_dir or genv.listfiles
+
+    local function file_exists(path)
+        if type(safe_isfile) == "function" then
+            local ok, res = pcall(safe_isfile, path)
+            if ok and type(res) == "boolean" then
+                return res
+            end
+        end
+        if type(safe_readfile) == "function" then
+            local ok, content = pcall(safe_readfile, path)
+            return ok and type(content) == "string"
+        end
+        return false
+    end
+
+    local function folder_exists(path)
+        if type(safe_isfolder) == "function" then
+            local ok, res = pcall(safe_isfolder, path)
+            if ok and type(res) == "boolean" then
+                return res
+            end
+        end
+        return false
+    end
+
+    local function make_folder(path)
+        if type(safe_makefolder) == "function" then
+            pcall(safe_makefolder, path)
+        end
+    end
+
     local a7 = 1
     local a8 = "airflow:"
     local function a9(ba, bb)
         return ba.ConfigFolder .. "/" .. bb .. ".json"
     end
     local function ba()
-        return type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
+        return type(safe_writefile) == "function" and type(safe_readfile) == "function"
     end
     local function bb(bc)
-        if type(isfolder) ~= "function" or type(makefolder) ~= "function" then
-            return
-        end
-        local bd = ""
-        for be in tostring(bc):gmatch("[^/\\]+") do
-            bd = bd == "" and be or bd .. "/" .. be
-            if not isfolder(bd) then
-                makefolder(bd)
+        pcall(function()
+            local bd = ""
+            for be in tostring(bc):gmatch("[^/\\]+") do
+                bd = bd == "" and be or bd .. "/" .. be
+                if not folder_exists(bd) then
+                    make_folder(bd)
+                end
             end
-        end
+        end)
     end
     local function bc(bd)
         return string.format(
@@ -8387,8 +8449,10 @@ end
             bq = bs
         end
         for bs, bt in pairs(bq) do
-            if type(bs) ~= "string" or type(bt) ~= "table" then
-                return nil, "invalid config code"
+            if type(bs) == "string" then
+                if type(bt) ~= "table" then
+                    bq[bs] = { Value = bt }
+                end
             end
         end
         return bq, br
@@ -8406,12 +8470,9 @@ end
         end
         bb(bp.ConfigFolder)
         local path = a9(bp, bq)
-        local written, writeErr = pcall(writefile, path, bt)
+        local written, writeErr = pcall(safe_writefile, path, bt)
         if not written then
             return false, writeErr
-        end
-        if type(isfile) == "function" and not isfile(path) then
-            return false, "config file was not written"
         end
         return true
     end
@@ -8423,12 +8484,9 @@ end
             return nil, "invalid config name"
         end
         local bs = a9(bq, br)
-        if not isfile(bs) then
-            return nil, "no config named " .. tostring(br)
-        end
-        local bt, bu = pcall(readfile, bs)
+        local bt, bu = pcall(safe_readfile, bs)
         if not bt or type(bu) ~= "string" then
-            return nil, "could not read " .. br
+            return nil, "no config named " .. tostring(br)
         end
         local bv, bw = bn(bu)
         if not bv then
@@ -8437,7 +8495,7 @@ end
         return bv, bw
     end
     function a2:ConfigExists(bq)
-        return bi(bq) and ba() and isfile(a9(self, bq)) or false
+        return bi(bq) and ba() and file_exists(a9(self, bq)) or false
     end
     function a2:SaveConfig(bq)
         bq = bq or self.ConfigName
@@ -8689,18 +8747,18 @@ end
         return true, nil, bs
     end
     local function br(bs)
-        if not ba() or not isfile(bs) then
+        if not ba() then
             return nil
         end
-        local bt, bu = pcall(readfile, bs)
+        local bt, bu = pcall(safe_readfile, bs)
         if bt and type(bu) == "string" and bu ~= "" then
             return bu
         end
         return nil
     end
     local function bs(bt)
-        if ba() and type(delfile) == "function" and isfile(bt) then
-            pcall(delfile, bt)
+        if ba() and type(safe_delfile) == "function" and file_exists(bt) then
+            pcall(safe_delfile, bt)
         end
     end
     local function bt(bu)
@@ -8727,12 +8785,13 @@ end
             bv[bw] = bx
         end
         bb(self.ConfigFolder)
-        return pcall(writefile, bt(self), e:JSONEncode(bv))
+        return pcall(safe_writefile, bt(self), e:JSONEncode(bv))
     end
     local function bu(bv, bw)
         if bw == "Account" then
             local plr = j or f.LocalPlayer
-            return bv.ConfigFolder .. "/autoload_" .. tostring(plr and plr.UserId or 0) .. ".txt"
+            local uid = (plr and plr.UserId) or (f.LocalPlayer and f.LocalPlayer.UserId) or 0
+            return bv.ConfigFolder .. "/autoload_" .. tostring(uid) .. ".txt"
         end
         return bv.ConfigFolder .. "/autoload.txt"
     end
@@ -8751,7 +8810,15 @@ end
         if bv then
             return readName(bv)
         end
-        return readName("Account") or readName("Global")
+        local settings = self:_readConfigSettings()
+        if settings.AutoloadDisabled == true then
+            return nil
+        end
+        local name = readName("Account") or readName("Global")
+        if not name and self.ConfigName and self:ConfigExists(self.ConfigName) then
+            return self.ConfigName
+        end
+        return name
     end
     function a2:SetAutoload(bv, bw)
         if not ba() then
@@ -8767,11 +8834,15 @@ end
             if bw == "Global" then
                 bs(bu(self, "Account"))
             end
+            self:_writeConfigSettings({ AutoloadDisabled = true })
         else
             bb(self.ConfigFolder)
-            bx, by = pcall(writefile, bu(self, bw), tostring(bv))
-            if bx and bw == "Global" then
-                bs(bu(self, "Account"))
+            bx, by = pcall(safe_writefile, bu(self, bw), tostring(bv))
+            if bx then
+                if bw == "Global" then
+                    bs(bu(self, "Account"))
+                end
+                self:_writeConfigSettings({ AutoloadDisabled = false })
             end
         end
         self:_configChanged()
@@ -8795,7 +8866,7 @@ end
         return true
     end
     function a2:LoadAutoload(bv)
-        local bw = self:GetAutoload()
+        local bw = self:GetAutoload() or (self.ConfigName and self:ConfigExists(self.ConfigName) and self.ConfigName)
         if not bw then
             return false, "no autoload config"
         end
