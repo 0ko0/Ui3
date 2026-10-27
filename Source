@@ -1295,17 +1295,20 @@ local a = (function()
         return table.unpack(aM, 1, aM.n)
     end
     local function aL(aM, aN, aO)
-        local aP = 0
-        local aQ = tostring(aO)
-        local aR = aQ:find("%.")
-        if aR then
-            aP = #aQ - aR
+        local function decimalsOf(n)
+            local s = string.format("%.8f", math.abs(n)):gsub("0+$", "")
+            local dot = s:find(".", 1, true)
+            return dot and (#s - dot) or 0
         end
+        local aP = math.min(math.max(decimalsOf(aO), decimalsOf(aM)), 8)
         local aS = "%." .. aP .. "f"
+        local mult = 10 ^ aP
         return {
             snap = function(aT)
-                aT = math.floor(aT / aO + 0.5) * aO
-                return math.clamp(aT, aM, aN)
+                aT = math.clamp(aT, aM, aN)
+                local snapped = aM + math.floor((aT - aM) / aO + 0.5) * aO
+                snapped = math.floor(snapped * mult + 0.5) / mult
+                return math.clamp(snapped == 0 and 0 or snapped, aM, aN)
             end,
             format = function(aT)
                 return string.format(aS, aT)
@@ -2686,7 +2689,7 @@ local a = (function()
         local chipH = metrics.Chip
         local window = self.Window
         local itemH = E and 40 or 30
-        local maxRows = opt.MaxRows or 6
+        local maxRows = math.max(math.floor(tonumber(opt.MaxRows) or 6), 1)
         local stacked = compact and opt.Stacked == true
         local topPad = 2
         if stacked then
@@ -4337,9 +4340,15 @@ local a = (function()
             150,
             "Stepper"
         )
-        local a_ = aU.Min or 0
-        local a0 = aU.Max or 100
-        local a1 = aU.Step or 1
+        local a_ = tonumber(aU.Min) or 0
+        local a0 = tonumber(aU.Max) or 100
+        if a_ > a0 then
+            a_, a0 = a0, a_
+        end
+        local a1 = tonumber(aU.Step) or 1
+        if not (a1 > 0) then
+            a1 = 1
+        end
         local a2 = aU.Suffix or ""
         local a3 = aL(a_, a0, a1)
         local a4 = aM(self).Compact
@@ -4415,8 +4424,8 @@ local a = (function()
         a6:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
             aR(aY, aZ, a6.AbsoluteSize.X / self.Window.Scale.Scale + (a4 and 24 or 20))
         end)
-        local bd = { Value = math.clamp(aU.Default or a_, a_, a0) }
         local be = a3.snap
+        local bd = { Value = be(tonumber(aU.Default) or a_) }
         local bf = false
         local function bg()
             ba.Text = a3.format(bd.Value) .. a2
@@ -4451,14 +4460,17 @@ local a = (function()
         end
         local function bi(bj, bk)
             local bl = false
+            local holdId = 0
             bj.InputBegan:Connect(function(bm)
                 if not aw(bm) then
                     return
                 end
                 bl = true
+                holdId += 1
+                local myId = holdId
                 bh(bk)
                 task.delay(0.4, function()
-                    while bl do
+                    while bl and holdId == myId do
                         bh(bk)
                         task.wait(0.07)
                     end
@@ -19791,7 +19803,7 @@ end
         self._weatherSpeed = math.clamp(tonumber(b7) or 1, 0.1, 3)
     end
     local b7 =
-        { Top = 8, Width = E and 208 or 198, Height = E and 46 or 42, Wide = 340, Radius = 34, Bars = 4, Pinned = 6 }
+        { Top = 6, Width = E and 172 or 160, Height = E and 36 or 32, Wide = 304, Radius = 28, Bars = 4, Pinned = 6 }
     local function b8(b9, ca, cb, cc)
         if b9._ghost then
             b9._ghost:Destroy()
@@ -19843,7 +19855,7 @@ end
             if sw <= 0 then
                 return b7.Wide
             end
-            return math.clamp(sw - 20, 260, b7.Wide)
+            return math.clamp(sw - 20, 240, b7.Wide)
         end
         IslandX.lastWide = IslandX.wide()
         local cc = ai(
@@ -19906,47 +19918,18 @@ end
             {
                 Name = "Compact",
                 Size = UDim2.fromScale(1, 1),
-                BackgroundColor3 = Color3.fromRGB(30, 30, 34),
+                BackgroundColor3 = Color3.new(0, 0, 0),
+                BackgroundTransparency = 1,
                 BorderSizePixel = 0,
                 Parent = cc,
             }
         )
-        ai(
-            "UIGradient",
-            { Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(120, 120, 120)), Parent = ci }
-        )
-        local cj = ai(
-            "Frame",
-            {
-                AnchorPoint = Vector2.new(0, 0.5),
-                Position = UDim2.new(0, 5, 0.5, 0),
-                Size = UDim2.fromOffset(b7.Height - 8, b7.Height - 8),
-                BackgroundColor3 = z.Accent,
-                BackgroundTransparency = 0.82,
-                BorderSizePixel = 0,
-                Parent = ci,
-            }
-        )
-        aj(cj, UDim.new(1, 0))
-        local ck = ai(
-            "ImageLabel",
-            {
-                AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.fromOffset(b7.Height - 16, b7.Height - 16),
-                BackgroundTransparency = 1,
-                ImageColor3 = z.Accent,
-                ScaleType = Enum.ScaleType.Fit,
-                Parent = cj,
-            }
-        )
-        aq(ck, self._logoIcon, true)
         local cl = am({
             AnchorPoint = Vector2.new(0, 0.5),
-            Position = UDim2.new(0, b7.Height + 2, 0.5, 0),
-            Size = UDim2.new(1, -b7.Height - 2 - 72, 0, 18),
+            Position = UDim2.new(0, 14, 0.5, 0),
+            Size = UDim2.new(1, -80, 0, 16),
             Text = self.Title,
-            TextSize = 13,
+            TextSize = 12,
             FontFace = D.Bold,
             TextColor3 = Color3.fromRGB(244, 244, 246),
             Parent = ci,
@@ -19955,7 +19938,7 @@ end
             "Frame",
             {
                 AnchorPoint = Vector2.new(1, 0.5),
-                Position = UDim2.new(1, -14, 0.5, 0),
+                Position = UDim2.new(1, -12, 0.5, 0),
                 Size = UDim2.fromOffset(0, 18),
                 AutomaticSize = Enum.AutomaticSize.X,
                 BackgroundTransparency = 1,
@@ -19969,7 +19952,7 @@ end
                 HorizontalAlignment = Enum.HorizontalAlignment.Right,
                 VerticalAlignment = Enum.VerticalAlignment.Center,
                 SortOrder = Enum.SortOrder.LayoutOrder,
-                Padding = UDim.new(0, 7),
+                Padding = UDim.new(0, 6),
                 Parent = cm,
             }
         )
@@ -20012,7 +19995,7 @@ end
         })
         local cq = ai(
             "Frame",
-            { Size = UDim2.fromOffset(6, 6), BackgroundColor3 = z.Accent, BorderSizePixel = 0, LayoutOrder = -1, Parent = cm }
+            { Size = UDim2.fromOffset(5, 5), BackgroundColor3 = z.Accent, BorderSizePixel = 0, LayoutOrder = -1, Parent = cm }
         )
         aj(cq, UDim.new(1, 0))
         local cr = am({
@@ -20021,7 +20004,7 @@ end
             Text = "0s",
             TextSize = 12,
             FontFace = D.Bold,
-            TextColor3 = Color3.fromRGB(220, 220, 224),
+            TextColor3 = Color3.fromRGB(200, 200, 208),
             TextTruncate = Enum.TextTruncate.None,
             LayoutOrder = 0,
             Parent = cm,
@@ -20030,33 +20013,33 @@ end
         local ct = ai(
             "Frame",
             {
-                Position = UDim2.fromOffset(16, 14),
-                Size = UDim2.new(1, -32, 0, 0),
+                Position = UDim2.fromOffset(14, 12),
+                Size = UDim2.new(1, -28, 0, 0),
                 AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundTransparency = 1,
                 Parent = cs,
             }
         )
-        ai("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8), Parent = ct })
+        ai("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = ct })
         local cu =
-            ai("Frame", { Size = UDim2.new(1, 0, 0, 48), BackgroundTransparency = 1, LayoutOrder = 1, Parent = ct })
+            ai("Frame", { Size = UDim2.new(1, 0, 0, 40), BackgroundTransparency = 1, LayoutOrder = 1, Parent = ct })
         local cv = ai(
             "ImageLabel",
             {
-                Size = UDim2.fromOffset(48, 48),
+                Size = UDim2.fromOffset(40, 40),
                 BackgroundColor3 = Color3.fromRGB(38, 38, 41),
                 BorderSizePixel = 0,
                 Image = "rbxthumb://type=AvatarHeadShot&id=" .. tostring(j.UserId) .. "&w=150&h=150",
                 Parent = cu,
             }
         )
-        aj(cv, UDim.new(0, 12))
+        aj(cv, UDim.new(1, 0))
         local cw = ai(
             "ImageLabel",
             {
                 AnchorPoint = Vector2.new(0.5, 0.5),
                 Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.fromOffset(20, 20),
+                Size = UDim2.fromOffset(18, 18),
                 BackgroundTransparency = 1,
                 ImageColor3 = z.Muted,
                 ImageTransparency = 1,
@@ -20067,19 +20050,19 @@ end
         aq(cw, "user")
         self:_trackAvatar(cv, cw)
         local cx = am({
-            Position = UDim2.fromOffset(60, 5),
-            Size = UDim2.new(1, -150, 0, 20),
-            TextSize = 15,
+            Position = UDim2.fromOffset(50, 2),
+            Size = UDim2.new(1, -130, 0, 18),
+            TextSize = 14,
             FontFace = D.Bold,
             TextColor3 = Color3.fromRGB(244, 244, 246),
             Parent = cu,
         })
         self:_trackName(cx, "Display")
         local cy = am({
-            Position = UDim2.fromOffset(60, 26),
-            Size = UDim2.new(1, -150, 0, 15),
+            Position = UDim2.fromOffset(50, 20),
+            Size = UDim2.new(1, -130, 0, 14),
             Text = "",
-            TextSize = 12,
+            TextSize = 11,
             FontFace = D.Regular,
             TextColor3 = z.Muted,
             Parent = cu,
@@ -20089,10 +20072,10 @@ end
         end)
         local cz = am({
             AnchorPoint = Vector2.new(1, 0),
-            Position = UDim2.new(1, 0, 0, 3),
-            Size = UDim2.fromOffset(90, 24),
+            Position = UDim2.new(1, 0, 0, 2),
+            Size = UDim2.fromOffset(80, 22),
             Text = "0s",
-            TextSize = 20,
+            TextSize = 18,
             FontFace = D.Bold,
             TextColor3 = Color3.fromRGB(244, 244, 246),
             TextXAlignment = Enum.TextXAlignment.Right,
@@ -20100,26 +20083,26 @@ end
         })
         am({
             AnchorPoint = Vector2.new(1, 0),
-            Position = UDim2.new(1, 0, 0, 27),
-            Size = UDim2.fromOffset(90, 14),
+            Position = UDim2.new(1, 0, 0, 23),
+            Size = UDim2.fromOffset(80, 12),
             Text = "session",
-            TextSize = 11,
+            TextSize = 10,
             FontFace = D.Regular,
             TextColor3 = z.Muted,
             TextXAlignment = Enum.TextXAlignment.Right,
             Parent = cu,
         })
         local cA =
-            ai("Frame", { Size = UDim2.new(1, 0, 0, 42), BackgroundTransparency = 1, LayoutOrder = 2, Parent = ct })
+            ai("Frame", { Size = UDim2.new(1, 0, 0, 36), BackgroundTransparency = 1, LayoutOrder = 2, Parent = ct })
         local function cB(cC, cD)
             local cE = ai(
                 "Frame",
                 { Position = cC, Size = UDim2.new(0.5, -10, 1, 0), BackgroundTransparency = 1, Parent = cA }
             )
             local cF = am({
-                Size = UDim2.new(1, -70, 0, 24),
+                Size = UDim2.new(1, -70, 0, 22),
                 Text = "",
-                TextSize = 20,
+                TextSize = 18,
                 FontFace = D.Bold,
                 TextColor3 = Color3.fromRGB(244, 244, 246),
                 RichText = true,
@@ -20127,7 +20110,7 @@ end
             })
             am({
                 AnchorPoint = Vector2.new(1, 0),
-                Position = UDim2.new(1, 0, 0, 6),
+                Position = UDim2.new(1, 0, 0, 5),
                 Size = UDim2.fromOffset(70, 14),
                 Text = cD,
                 TextSize = 10,
@@ -20157,7 +20140,7 @@ end
         local cC, cD = cB(UDim2.fromScale(0, 0), "FRAME RATE")
         local cE, cF = cB(UDim2.new(0.5, 10, 0, 0), "PING")
         local cG =
-            ai("Frame", { Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, LayoutOrder = 3, Parent = ct })
+            ai("Frame", { Size = UDim2.new(1, 0, 0, 26), BackgroundTransparency = 1, LayoutOrder = 3, Parent = ct })
         ai(
             "UIListLayout",
             {
@@ -20172,7 +20155,7 @@ end
             local cL = ai(
                 "Frame",
                 {
-                    Size = UDim2.fromOffset(0, 30),
+                    Size = UDim2.fromOffset(0, 26),
                     AutomaticSize = Enum.AutomaticSize.X,
                     BackgroundColor3 = Color3.fromRGB(32, 32, 35),
                     BorderSizePixel = 0,
@@ -20181,14 +20164,14 @@ end
                 }
             )
             aj(cL, UDim.new(1, 0))
-            al(cL, 14, 14)
+            al(cL, 11, 11)
             ai(
                 "UIListLayout",
                 {
                     FillDirection = Enum.FillDirection.Horizontal,
                     VerticalAlignment = Enum.VerticalAlignment.Center,
                     SortOrder = Enum.SortOrder.LayoutOrder,
-                    Padding = UDim.new(0, 7),
+                    Padding = UDim.new(0, 5),
                     Parent = cL,
                 }
             )
@@ -20196,7 +20179,7 @@ end
                 Size = UDim2.new(0, 0, 1, 0),
                 AutomaticSize = Enum.AutomaticSize.X,
                 Text = cJ,
-                TextSize = 12,
+                TextSize = 11,
                 FontFace = D.Regular,
                 TextColor3 = z.Muted,
                 TextTruncate = Enum.TextTruncate.None,
@@ -20207,7 +20190,7 @@ end
                 Size = UDim2.new(0, 0, 1, 0),
                 AutomaticSize = Enum.AutomaticSize.X,
                 Text = "",
-                TextSize = 12,
+                TextSize = 11,
                 FontFace = D.Bold,
                 TextColor3 = cK or Color3.fromRGB(244, 244, 246),
                 TextTruncate = Enum.TextTruncate.None,
@@ -20294,8 +20277,8 @@ end
         local cU = ai(
             "Frame",
             {
-                Position = UDim2.fromOffset(16, 13),
-                Size = UDim2.new(1, -32, 0, 0),
+                Position = UDim2.fromOffset(14, 11),
+                Size = UDim2.new(1, -28, 0, 0),
                 AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundTransparency = 1,
                 Parent = cT,
@@ -20304,7 +20287,7 @@ end
         local cV = ai(
             "Frame",
             {
-                Size = UDim2.fromOffset(34, 34),
+                Size = UDim2.fromOffset(30, 30),
                 BackgroundColor3 = z.Accent,
                 BackgroundTransparency = 0.85,
                 BorderSizePixel = 0,
@@ -20317,7 +20300,7 @@ end
             {
                 AnchorPoint = Vector2.new(0.5, 0.5),
                 Position = UDim2.fromScale(0.5, 0.5),
-                Size = UDim2.fromOffset(17, 17),
+                Size = UDim2.fromOffset(15, 15),
                 BackgroundTransparency = 1,
                 ImageColor3 = z.Accent,
                 ScaleType = Enum.ScaleType.Fit,
@@ -20327,19 +20310,19 @@ end
         local cX = ai(
             "Frame",
             {
-                Position = UDim2.fromOffset(46, 0),
-                Size = UDim2.new(1, -46, 0, 0),
+                Position = UDim2.fromOffset(40, 0),
+                Size = UDim2.new(1, -40, 0, 0),
                 AutomaticSize = Enum.AutomaticSize.Y,
                 BackgroundTransparency = 1,
                 Parent = cU,
             }
         )
         ai("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 1), Parent = cX })
-        local cY = am({ Size = UDim2.new(1, -34, 0, 18), TextSize = 14, FontFace = D.Bold, LayoutOrder = 1, Parent = cX })
+        local cY = am({ Size = UDim2.new(1, -30, 0, 16), TextSize = 13, FontFace = D.Bold, LayoutOrder = 1, Parent = cX })
         local cZ = am({
             Size = UDim2.new(1, 0, 0, 0),
             AutomaticSize = Enum.AutomaticSize.Y,
-            TextSize = 12,
+            TextSize = 11,
             FontFace = D.Regular,
             TextColor3 = z.Muted,
             TextWrapped = true,
@@ -20404,9 +20387,9 @@ end
         local dd = false
         local function de(df)
             if df == "Expanded" then
-                return Vector2.new(IslandX.wide(), math.floor(ct.AbsoluteSize.Y + 28 + 0.5)), b7.Radius
+                return Vector2.new(IslandX.wide(), math.floor(ct.AbsoluteSize.Y + 24 + 0.5)), b7.Radius
             elseif df == "Activity" then
-                return Vector2.new(IslandX.wide(), math.floor(math.max(cU.AbsoluteSize.Y, 34) + 26 + 0.5)), b7.Radius
+                return Vector2.new(IslandX.wide(), math.floor(math.max(cU.AbsoluteSize.Y, 30) + 22 + 0.5)), b7.Radius
             end
             return Vector2.new(b7.Width, b7.Height), b7.Height / 2
         end
@@ -20910,12 +20893,12 @@ end
             end
         end)
         local dn = am({
-            AnchorPoint = Vector2.new(1, 0.5),
-            Position = UDim2.new(1, -14, 0.5, 0),
-            Size = UDim2.new(1, -52, 0, 18),
-            TextSize = 13,
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.new(1, -28, 0, 16),
+            TextSize = 12,
             FontFace = D.Bold,
-            TextXAlignment = Enum.TextXAlignment.Right,
+            TextXAlignment = Enum.TextXAlignment.Center,
             RichText = true,
             TextTransparency = 1,
             Parent = ci,
@@ -20926,7 +20909,7 @@ end
                 Name = "IslandBubble",
                 AnchorPoint = Vector2.new(0.5, 0.5),
                 Size = UDim2.fromOffset(0, 0),
-                BackgroundColor3 = Color3.fromRGB(26, 26, 30),
+                BackgroundColor3 = Color3.new(0, 0, 0),
                 BorderSizePixel = 0,
                 Text = "",
                 AutoButtonColor = false,
