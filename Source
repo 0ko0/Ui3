@@ -1300,13 +1300,17 @@ local a = (function()
             local dot = s:find(".", 1, true)
             return dot and (#s - dot) or 0
         end
-        local aP = math.min(math.max(decimalsOf(aO), decimalsOf(aM)), 8)
+        local aP = math.min(math.max(decimalsOf(aO), decimalsOf(aM), decimalsOf(aN)), 8)
         local aS = "%." .. aP .. "f"
         local mult = 10 ^ aP
         return {
             snap = function(aT)
                 aT = math.clamp(aT, aM, aN)
                 local snapped = aM + math.floor((aT - aM) / aO + 0.5) * aO
+                -- the end of the range stays reachable even when it is not on the step grid
+                if snapped > aN or math.abs(aN - aT) < math.abs(snapped - aT) then
+                    snapped = aN
+                end
                 snapped = math.floor(snapped * mult + 0.5) / mult
                 return math.clamp(snapped == 0 and 0 or snapped, aM, aN)
             end,
@@ -3765,156 +3769,429 @@ local a = (function()
         return m(self, opt, by, frame, "Dropdown")
     end
     k._amountSuffixes = { k = 1e3, m = 1e6, b = 1e9, t = 1e12, qa = 1e15, qi = 1e18 }
-    function k._parseAmount(aU)
-        aU = string.lower(tostring(aU)):gsub("[%s,_%$]", "")
-        aU = aU:gsub("kg$", ""):gsub("/s$", "")
-        local aV = tonumber(aU)
-        if aV then
-            return aV
+    -- Parses "1.5k", "2,5m", "1,234.56", "1.234,56", "300kg", "12/s" ... into a number.
+    -- Returns nil when the text is not a finite number.
+    function k._parseAmount(text)
+        text = string.lower(tostring(text)):gsub("[%s_%$]", "")
+        text = text:gsub("kg$", ""):gsub("/s$", "")
+        if text:find("^[%+%-]?0x") or text:find("^[%+%-]?0b[01]") then
+            return nil
         end
-        local aW, aX = aU:match("^(.-)(%a+)$")
-        local aY = aX and k._amountSuffixes[aX]
-        aV = aW and tonumber(aW)
-        if aV and aY then
-            return aV * aY
+        -- digits grouped by exactly three: "1,500" / "1.234.567" / "12,345k"
+        local function grouped(sep)
+            local head, tail = text:match("^[%+%-]?([1-9]%d?%d?)(.*)$")
+            if not head then
+                return false
+            end
+            local pos = 1
+            while tail:sub(pos, pos) == sep and tail:sub(pos + 1, pos + 3):match("^%d%d%d$") do
+                pos += 4
+            end
+            return pos > 1 and tail:sub(pos):match("^%a*$") ~= nil
         end
-        return nil
+        local lastComma = text:find(",[^,]*$")
+        local lastDot = text:find("%.[^%.]*$")
+        if lastComma and lastDot then
+            -- both marks present: the last one is the decimal mark
+            if lastComma > lastDot then
+                text = text:gsub("%.", ""):gsub(",", ".")
+            else
+                text = text:gsub(",", "")
+            end
+        elseif lastComma then
+            local _, commaCount = text:gsub(",", "")
+            if not grouped(",") and commaCount == 1 then
+                text = text:gsub(",", ".") -- "1,5" / "2,50k": decimal comma
+            else
+                text = text:gsub(",", "")
+            end
+        elseif lastDot and grouped(".") then
+            text = text:gsub("%.", "")
+        end
+        local value = tonumber(text)
+        if value == nil then
+            local number, unit = text:match("^(.-)(%a+)$")
+            local mult = unit and k._amountSuffixes[unit]
+            value = number and mult and tonumber(number)
+            if value then
+                value = value * mult
+            end
+        end
+        if value == nil or value ~= value or value == math.huge or value == -math.huge then
+            return nil
+        end
+        return value
     end
-    function aS:Input(aU)
-        local aV, aW, aX, aY, aZ
-        aU, aV, aW, aX, aY, aZ = aQ(
+    -- Input: text box, or numeric box that understands 1.5k / 2m / 3b ... (Numeric = true).
+    -- Options: Name/Title, Desc/Description, Default/CurrentValue, Placeholder/PlaceholderText, Icon, Flag, Tooltip, Visible,
+    --          Disabled, MaxLength (characters), SelectOnFocus (default: Numeric), Numeric, Min/Max/Range (Numeric only),
+    --          Callback(value, enterPressed) when the edit is committed, OnChanged(text) on every keystroke.
+    -- Methods: Set(value, silent), Get(), SetDisabled(bool), IsDisabled(), SetText(title), SetDesc(text),
+    --          SetPlaceholder(text), Focus(), ReleaseFocus(), IsFocused().
+    -- Enter or clicking away commits, Escape cancels. Set() fires Callback when the value changed unless silent = true.
+    function aS:Input(opts)
+        local card, cardStroke, rowH, titleLbl, descLbl
+        opts, card, cardStroke, rowH, titleLbl, descLbl = aQ(
             self,
-            aU,
+            opts,
             { Title = "Name", Description = "Desc", PlaceholderText = "Placeholder", CurrentValue = "Default", Value = "Default" },
             "Frame",
             160,
             "Input"
         )
-        local a_ = aM(self).Compact
-        local a0 = a_ and aM(self).Chip + 2 or 30
-        local a1 = ai(
-            "Frame",
-            {
-                AnchorPoint = Vector2.new(1, 0.5),
-                Position = UDim2.new(1, a_ and -14 or -10, 0.5, 0),
-                Size = UDim2.fromOffset(170, a0),
-                BackgroundColor3 = z.Surface,
-                BorderSizePixel = 0,
-                Parent = aV,
-            }
-        )
-        aj(a1, UDim.new(0, 6))
-        local a2 = ak(a1)
-        local a3 = aU.Icon
-        if a3 then
-            aB(a1, a3, z.Muted, UDim2.new(0, 8, 0.5, 0))
+        local compact = aM(self).Compact
+        local chipH = compact and aM(self).Chip + 2 or 30
+        local numeric = opts.Numeric and true or false
+        local maxLength = tonumber(opts.MaxLength)
+        if maxLength then
+            maxLength = math.floor(maxLength)
+            if maxLength < 1 then
+                maxLength = nil
+            end
         end
-        local a4 = ai(
-            "TextBox",
-            {
-                Position = UDim2.fromOffset(a3 and 30 or 8, 0),
-                Size = UDim2.new(1, a3 and -38 or -16, 1, 0),
-                BackgroundTransparency = 1,
-                Text = aU.Default or "",
-                PlaceholderText = aU.Placeholder or "",
-                PlaceholderColor3 = z.Muted,
-                TextColor3 = z.Text,
-                TextSize = a_ and 13 or 14,
-                FontFace = D.Regular,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                ClearTextOnFocus = false,
-                TextTruncate = Enum.TextTruncate.None,
-                ClipsDescendants = true,
-                Parent = a1,
-            }
-        )
-        a1.ClipsDescendants = true
-        local a5 = a4.Text
-        local a6 = aU.Numeric and k._parseAmount(a5) or nil
-        if aU.Numeric and not a6 then
-            a5 = ""
+        local minV, maxV = tonumber(opts.Min), tonumber(opts.Max)
+        if minV and maxV and minV > maxV then
+            minV, maxV = maxV, minV
         end
-        local a7 = false
-        local a8 = (a3 and 30 or 8) + 8
-        local function a9(ba)
-            local bb
-            if a_ then
-                bb = aN(aV, self.Window)
+        local selectOnFocus = numeric
+        if opts.SelectOnFocus ~= nil then
+            selectOnFocus = opts.SelectOnFocus == true
+        end
+        local state = { disabled = opts.Disabled == true, focused = false, hover = false, invalid = false }
+        local api = {}
+
+        local function clampNumber(v)
+            if minV and v < minV then
+                return minV
+            end
+            if maxV and v > maxV then
+                return maxV
+            end
+            return v
+        end
+        local function trimLength(text)
+            if not maxLength then
+                return text
+            end
+            local len = utf8.len(text)
+            if not len then
+                return text:sub(1, maxLength)
+            end
+            if len <= maxLength then
+                return text
+            end
+            return text:sub(1, utf8.offset(text, maxLength + 1) - 1)
+        end
+
+        -- committedText / committedValue: the last accepted value (Numeric keeps the parsed number too)
+        local initial = opts.Default ~= nil and trimLength(tostring(opts.Default)) or ""
+        local committedText, committedValue = initial, nil
+        if numeric then
+            local raw = k._parseAmount(initial)
+            if raw == nil then
+                initial, committedText = "", ""
             else
-                local bc = aV.AbsoluteSize.X / self.Window.Scale.Scale
-                local bd = math.clamp(bc - 14 - 110 - 20, 100, 200)
-                local be = a4.TextBounds.X
-                if #a4.Text == 0 then
-                    be = math.min(a4.TextBounds.X, 90)
+                committedValue = clampNumber(raw)
+                if committedValue ~= raw then
+                    initial = tostring(committedValue)
+                    committedText = initial
                 end
-                bb = math.clamp(be + a8 + 12, 90, bd) + (a7 and 8 or 0)
-                bb = math.min(bb, bd + 8)
-            end
-            aR(aY, aZ, bb + (a_ and 24 or 20))
-            if ba then
-                a1.Size = UDim2.fromOffset(bb, a0)
-            else
-                ah(a1, { Size = UDim2.fromOffset(bb, a0) }, 0.18)
             end
         end
-        local ba = 0
-        aV:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-            if aV.AbsoluteSize.X ~= ba then
-                ba = aV.AbsoluteSize.X
-                a9(true)
+
+        local chip = ai("Frame", {
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, compact and -14 or -10, 0.5, 0),
+            Size = UDim2.fromOffset(170, chipH),
+            BackgroundColor3 = z.Surface,
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+            Parent = card,
+        })
+        aj(chip, UDim.new(0, 6))
+        local chipStroke = ak(chip)
+        local iconImage
+        local hasIcon = opts.Icon ~= nil and opts.Icon ~= false
+        if hasIcon then
+            local iconFrame, image = aB(chip, opts.Icon, z.Muted, UDim2.new(0, 8, 0.5, 0))
+            iconImage = image
+        end
+        local inset = hasIcon and 30 or 8
+        local box = ai("TextBox", {
+            Position = UDim2.fromOffset(inset, 0),
+            Size = UDim2.new(1, hasIcon and -38 or -16, 1, 0),
+            BackgroundTransparency = 1,
+            Text = initial,
+            PlaceholderText = opts.Placeholder ~= nil and tostring(opts.Placeholder) or "",
+            PlaceholderColor3 = z.Muted,
+            TextColor3 = z.Text,
+            TextSize = compact and 13 or 14,
+            FontFace = D.Regular,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ClearTextOnFocus = false,
+            TextTruncate = Enum.TextTruncate.None,
+            ClipsDescendants = true,
+            TextEditable = not state.disabled,
+            Parent = chip,
+        })
+        -- invisible twin of the placeholder: TextBox.TextBounds ignores the placeholder, this lets the box fit it
+        local ghost = ai("TextLabel", {
+            Size = UDim2.fromOffset(10, 10),
+            BackgroundTransparency = 1,
+            Text = box.PlaceholderText,
+            TextSize = box.TextSize,
+            FontFace = D.Regular,
+            TextTransparency = 1,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.None,
+            Parent = chip,
+        })
+
+        -- Text written by code goes through setBoxText so the Text listener can tell it apart from typing.
+        local lastText = initial
+        local function setBoxText(text)
+            lastText = text
+            box.Text = text
+        end
+
+        local function paintStroke(dur)
+            local color = z.Stroke
+            if state.invalid then
+                color = z.Error
+            elseif state.focused or (state.hover and not state.disabled) then
+                color = z.StrokeHover
             end
-        end)
-        a4:GetPropertyChangedSignal("Text"):Connect(function()
-            a9(false)
-        end)
-        a4:GetPropertyChangedSignal("TextBounds"):Connect(function()
-            a9(false)
-        end)
-        task.defer(a9, true)
-        a4.Focused:Connect(function()
-            a7 = true
-            ah(a2, { Color = z.StrokeHover }, 0.15)
-            a9(false)
-        end)
-        a4.FocusLost:Connect(function(bb)
-            a7 = false
-            ah(a2, { Color = z.Stroke }, 0.15)
-            a9(false)
-            if aU.Numeric then
-                local bc = k._parseAmount(a4.Text)
-                if not bc then
-                    a4.Text = a5
-                    return
+            ah(chipStroke, { Color = color }, dur)
+        end
+        local function paintDisabled(dur)
+            local dim = state.disabled and 0.55 or 0
+            ah(titleLbl, { TextTransparency = dim }, dur)
+            if descLbl then
+                ah(descLbl, { TextTransparency = dim }, dur)
+            end
+            ah(box, { TextTransparency = dim }, dur)
+            if iconImage then
+                ah(iconImage, { ImageTransparency = dim }, dur)
+            end
+        end
+
+        local lastWidth, sizeTween
+        local function fit(instant)
+            local width
+            if compact then
+                width = aN(card, self.Window)
+            else
+                local cardW = card.AbsoluteSize.X / self.Window.Scale.Scale
+                local maxW = math.clamp(cardW - 14 - 110 - 20, 100, 200)
+                local textW = box.TextBounds.X
+                if #box.Text == 0 then
+                    textW = ghost.TextBounds.X
                 end
-                a5, a6 = a4.Text, bc
-                aJ(aU.Callback, bc, bb)
+                width = math.clamp(textW + inset + 8 + 12, 90, maxW) + (state.focused and 8 or 0)
+                width = math.min(width, maxW + 8)
+            end
+            if width == lastWidth then
                 return
             end
-            aJ(aU.Callback, a4.Text, bb)
+            lastWidth = width
+            aR(titleLbl, descLbl, width + (compact and 24 or 20))
+            if sizeTween then
+                sizeTween:Cancel()
+                sizeTween = nil
+            end
+            if instant then
+                chip.Size = UDim2.fromOffset(width, chipH)
+            else
+                sizeTween = ah(chip, { Size = UDim2.fromOffset(width, chipH) }, 0.18)
+            end
+        end
+        local lastCardWidth = 0
+        card:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+            if card.AbsoluteSize.X ~= lastCardWidth then
+                lastCardWidth = card.AbsoluteSize.X
+                fit(true)
+            end
         end)
-        return m(self, aU, {
-            Set = function(bb, bc)
-                a4.Text = tostring(bc)
-                if aU.Numeric then
-                    local bd = k._parseAmount(a4.Text)
-                    if bd then
-                        a5, a6 = a4.Text, bd
-                    else
-                        a4.Text = a5
+        box:GetPropertyChangedSignal("TextBounds"):Connect(function()
+            fit(false)
+        end)
+        ghost:GetPropertyChangedSignal("TextBounds"):Connect(function()
+            fit(false)
+        end)
+        task.defer(fit, true)
+
+        -- keystrokes: enforce MaxLength, flag unreadable numbers, notify OnChanged
+        box:GetPropertyChangedSignal("Text"):Connect(function()
+            local text = box.Text
+            if text == lastText then
+                return
+            end
+            if maxLength then
+                local trimmed = trimLength(text)
+                if trimmed ~= text then
+                    text = trimmed
+                    setBoxText(trimmed)
+                end
+            end
+            lastText = text
+            if numeric then
+                local invalid = text ~= "" and k._parseAmount(text) == nil
+                if invalid ~= state.invalid then
+                    state.invalid = invalid
+                    paintStroke(0.12)
+                end
+            end
+            aJ(opts.OnChanged, text)
+        end)
+
+        local function commit(text, enterPressed)
+            if numeric then
+                local raw = k._parseAmount(text)
+                if raw == nil then
+                    setBoxText(committedText) -- not a number: put the previous value back
+                    return
+                end
+                local value = clampNumber(raw)
+                if value ~= raw then
+                    text = tostring(value)
+                    setBoxText(text)
+                end
+                committedText, committedValue = text, value
+                aJ(opts.Callback, value, enterPressed)
+                return
+            end
+            committedText = text
+            aJ(opts.Callback, text, enterPressed)
+        end
+
+        box.Focused:Connect(function()
+            state.focused = true
+            paintStroke(0.15)
+            fit(false)
+            if selectOnFocus then
+                task.defer(function()
+                    if box:IsFocused() then
+                        box.SelectionStart = 1
+                        box.CursorPosition = #box.Text + 1
                     end
+                end)
+            end
+        end)
+        box.FocusLost:Connect(function(enterPressed, inputObject)
+            state.focused = false
+            state.invalid = false
+            paintStroke(0.15)
+            if inputObject ~= nil and inputObject.KeyCode == Enum.KeyCode.Escape then
+                setBoxText(committedText)
+            else
+                commit(box.Text, enterPressed)
+            end
+            fit(false)
+        end)
+        box.MouseEnter:Connect(function()
+            if ax() or state.disabled then
+                return
+            end
+            state.hover = true
+            paintStroke(0.12)
+        end)
+        box.MouseLeave:Connect(function()
+            state.hover = false
+            paintStroke(0.25)
+        end)
+
+        function api:Set(value, silent)
+            local text = value == nil and "" or tostring(value)
+            text = trimLength(text)
+            if numeric then
+                local raw = k._parseAmount(text)
+                if raw == nil then
+                    return
                 end
-                aF(aW)
-            end,
-            Get = function()
-                if aU.Numeric then
-                    return a6
+                local clamped = clampNumber(raw)
+                if clamped ~= raw then
+                    text = tostring(clamped)
                 end
-                return a4.Text
-            end,
-            _saveValue = aU.Numeric and function()
-                return a5
-            end or nil,
-        }, aV, "Input")
+                local changed = clamped ~= committedValue
+                committedText, committedValue = text, clamped
+                setBoxText(text)
+                aF(cardStroke)
+                if changed and not silent then
+                    aJ(opts.Callback, clamped, false)
+                end
+                return
+            end
+            local changed = text ~= committedText
+            committedText = text
+            setBoxText(text)
+            aF(cardStroke)
+            if changed and not silent then
+                aJ(opts.Callback, text, false)
+            end
+        end
+        function api:Get()
+            if numeric then
+                return committedValue
+            end
+            return box.Text
+        end
+        api._saveValue = numeric and function()
+            return committedText
+        end or nil
+        function api:SetDisabled(v)
+            state.disabled = v == true
+            if state.disabled then
+                state.hover = false
+                if box:IsFocused() then
+                    box:ReleaseFocus()
+                end
+            end
+            box.TextEditable = not state.disabled
+            paintDisabled(0.15)
+            paintStroke(0.15)
+        end
+        function api:IsDisabled()
+            return state.disabled
+        end
+        function api:SetText(text)
+            text = tostring(text)
+            titleLbl.Text = text
+            api._searchName = text
+            api._searchKey = string.lower(text)
+        end
+        function api:SetDesc(text)
+            if descLbl then
+                descLbl.Text = tostring(text)
+            end
+        end
+        function api:SetPlaceholder(text)
+            text = text ~= nil and tostring(text) or ""
+            box.PlaceholderText = text
+            ghost.Text = text
+            fit(false)
+        end
+        function api:Focus()
+            if not state.disabled then
+                box:CaptureFocus()
+            end
+        end
+        function api:ReleaseFocus()
+            if box:IsFocused() then
+                box:ReleaseFocus()
+            end
+        end
+        function api:IsFocused()
+            return box:IsFocused()
+        end
+        api._onHide = function()
+            if box:IsFocused() then
+                box:ReleaseFocus()
+            end
+        end
+
+        paintDisabled(0)
+        paintStroke(0)
+        return m(self, opts, api, card, "Input")
     end
     function aS:Keybind(aU)
         local aV, aW, aX, aY, aZ
@@ -4330,166 +4607,366 @@ local a = (function()
         bp(0)
         return m(self, aU, bj, aW, "ColorPicker")
     end
-    function aS:Stepper(aU)
-        local aV, aW, aX, aY, aZ
-        aU, aV, aW, aX, aY, aZ = aQ(
+    -- Stepper: [-] value [+]. Click the value to type a number.
+    -- Options: Name/Title, Desc/Description, Default/CurrentValue, Min, Max, Step/Increment, Suffix, Flag, Tooltip, Visible,
+    --          Disabled, Callback(value).
+    -- Methods: Set(value, silent), Get(), SetRange(min, max, step, silent), SetSuffix(text), SetDisabled(bool),
+    --          IsDisabled(), SetText(title), SetDesc(text).
+    -- Holding +/- repeats (and speeds up on wide ranges); Shift multiplies the step by 10 with a mouse.
+    function aS:Stepper(opts)
+        local card, cardStroke, rowH, titleLbl, descLbl
+        opts, card, cardStroke, rowH, titleLbl, descLbl = aQ(
             self,
-            aU,
+            opts,
             { Title = "Name", Description = "Desc", CurrentValue = "Default", Value = "Default", Increment = "Step" },
             "Frame",
             150,
             "Stepper"
         )
-        local a_ = tonumber(aU.Min) or 0
-        local a0 = tonumber(aU.Max) or 100
-        if a_ > a0 then
-            a_, a0 = a0, a_
+        local function finite(v, fallback)
+            v = tonumber(v)
+            if v == nil or v ~= v or v == math.huge or v == -math.huge then
+                return fallback
+            end
+            return v
         end
-        local a1 = tonumber(aU.Step) or 1
-        if not (a1 > 0) then
-            a1 = 1
+        local minV = finite(opts.Min, 0)
+        local maxV = finite(opts.Max, 100)
+        if minV > maxV then
+            minV, maxV = maxV, minV
         end
-        local a2 = aU.Suffix or ""
-        local a3 = aL(a_, a0, a1)
-        local a4 = aM(self).Compact
-        local a5 = aM(self).Chip
-        local a6 = ai(
-            "Frame",
-            {
-                AnchorPoint = Vector2.new(1, 0.5),
-                Position = UDim2.new(1, a4 and -14 or -10, 0.5, 0),
-                Size = UDim2.fromOffset(0, a5),
-                AutomaticSize = Enum.AutomaticSize.X,
-                BackgroundColor3 = z.Surface,
-                BorderSizePixel = 0,
-                Parent = aV,
-            }
-        )
-        aj(a6, UDim.new(0, 6))
-        local a7 = ak(a6)
-        ai(
-            "UIListLayout",
-            {
-                FillDirection = Enum.FillDirection.Horizontal,
-                SortOrder = Enum.SortOrder.LayoutOrder,
-                VerticalAlignment = Enum.VerticalAlignment.Center,
-                Parent = a6,
-            }
-        )
-        local function a8(a9, ba)
-            local bb = ai(
-                "TextButton",
-                {
-                    Size = UDim2.fromOffset(a5, a5),
-                    BackgroundTransparency = 1,
-                    Text = a9,
-                    TextColor3 = z.Muted,
-                    TextSize = 18,
-                    FontFace = D.Medium,
-                    AutoButtonColor = false,
-                    LayoutOrder = ba,
-                    Parent = a6,
-                }
-            )
-            bb.MouseEnter:Connect(function()
-                ah(bb, { TextColor3 = z.Accent }, 0.12)
+        local step = finite(opts.Step, 1)
+        if not (step > 0) then
+            step = 1
+        end
+        local suffix = (opts.Suffix ~= nil and opts.Suffix ~= false) and tostring(opts.Suffix) or ""
+        local num = aL(minV, maxV, step)
+        local compact = aM(self).Compact
+        local chipH = aM(self).Chip
+        local state = { disabled = opts.Disabled == true, editing = false, stepping = false }
+        local api = { Value = num.snap(finite(opts.Default, minV)) }
+
+        local chip = ai("Frame", {
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, compact and -14 or -10, 0.5, 0),
+            Size = UDim2.fromOffset(0, chipH),
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundColor3 = z.Surface,
+            BorderSizePixel = 0,
+            Parent = card,
+        })
+        aj(chip, UDim.new(0, 6))
+        local chipStroke = ak(chip)
+        ai("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            Parent = chip,
+        })
+        local function makeButton(glyph, order)
+            local button = ai("TextButton", {
+                Size = UDim2.fromOffset(chipH, chipH),
+                BackgroundTransparency = 1,
+                Text = glyph,
+                TextColor3 = z.Muted,
+                TextSize = 18,
+                FontFace = D.Medium,
+                AutoButtonColor = false,
+                LayoutOrder = order,
+                Parent = chip,
+            })
+            button.MouseEnter:Connect(function()
+                if not state.disabled then
+                    ah(button, { TextColor3 = z.Accent }, 0.12)
+                end
             end)
-            bb.MouseLeave:Connect(function()
-                ah(bb, { TextColor3 = z.Muted }, 0.2)
+            button.MouseLeave:Connect(function()
+                ah(button, { TextColor3 = z.Muted }, 0.2)
             end)
-            return bb
+            return button
         end
-        local a9 = a8("\u{2212}", 1)
-        local ba = am({
+        local minusBtn = makeButton("\u{2212}", 1)
+        local box = ai("TextBox", {
             Size = UDim2.new(0, 30, 1, 0),
-            TextSize = 13,
+            BackgroundTransparency = 1,
+            Text = "",
             TextColor3 = z.Accent,
+            TextSize = 13,
+            FontFace = D.Medium,
             TextXAlignment = Enum.TextXAlignment.Center,
             TextTruncate = Enum.TextTruncate.None,
+            ClearTextOnFocus = false,
+            TextEditable = not state.disabled,
             LayoutOrder = 2,
-            Parent = a6,
+            Parent = chip,
         })
-        local bb = a8("+", 3)
-        local function bc(bd)
-            local be = math.max(ba.TextBounds.X + 12, 30)
-            if bd then
-                ba.Size = UDim2.new(0, be, 1, 0)
-            else
-                ah(ba, { Size = UDim2.new(0, be, 1, 0) }, 0.2)
+        local plusBtn = makeButton("+", 3)
+
+        local function paintStroke(dur)
+            ah(chipStroke, { Color = state.editing and z.StrokeHover or z.Stroke }, dur)
+        end
+        local function paintLimits(dur)
+            ah(minusBtn, { TextTransparency = (state.disabled or api.Value <= minV) and 0.6 or 0 }, dur)
+            ah(plusBtn, { TextTransparency = (state.disabled or api.Value >= maxV) and 0.6 or 0 }, dur)
+        end
+        local function paintDisabled(dur)
+            local dim = state.disabled and 0.55 or 0
+            ah(titleLbl, { TextTransparency = dim }, dur)
+            if descLbl then
+                ah(descLbl, { TextTransparency = dim }, dur)
             end
+            ah(box, { TextTransparency = dim }, dur)
+            paintLimits(dur)
         end
-        ba:GetPropertyChangedSignal("TextBounds"):Connect(function()
-            bc(false)
-        end)
-        a6:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-            aR(aY, aZ, a6.AbsoluteSize.X / self.Window.Scale.Scale + (a4 and 24 or 20))
-        end)
-        local be = a3.snap
-        local bd = { Value = be(tonumber(aU.Default) or a_) }
-        local bf = false
-        local function bg()
-            ba.Text = a3.format(bd.Value) .. a2
-            ah(a9, { TextTransparency = bd.Value <= a_ and 0.6 or 0 }, 0.15)
-            ah(bb, { TextTransparency = bd.Value >= a0 and 0.6 or 0 }, 0.15)
+        -- while typing the box shows the bare number, otherwise number + suffix
+        local function refreshText()
+            local text = num.format(api.Value)
+            if not state.editing then
+                text = text .. suffix
+            end
+            box.Text = text
         end
-        function bd:Set(bh, bi)
-            bh = be(tonumber(bh) or a_)
-            if bh == bd.Value then
+
+        local lastBoxWidth, sizeTween
+        local function fit(instant)
+            local width = math.max(box.TextBounds.X + 12, 30)
+            if width == lastBoxWidth then
                 return
             end
-            bd.Value = bh
-            bg()
-            if not bf then
-                aF(aW)
+            lastBoxWidth = width
+            if sizeTween then
+                sizeTween:Cancel()
+                sizeTween = nil
             end
-            if not bi then
-                aJ(aU.Callback, bh)
+            if instant then
+                box.Size = UDim2.new(0, width, 1, 0)
+            else
+                sizeTween = ah(box, { Size = UDim2.new(0, width, 1, 0) }, 0.2)
             end
         end
-        function bd:Get()
-            return bd.Value
+        box:GetPropertyChangedSignal("TextBounds"):Connect(function()
+            fit(state.editing)
+        end)
+        chip:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+            aR(titleLbl, descLbl, chip.AbsoluteSize.X / self.Window.Scale.Scale + (compact and 24 or 20))
+        end)
+
+        function api:Set(value, silent)
+            value = tonumber(value)
+            if not value or value ~= value then
+                return
+            end
+            value = num.snap(value)
+            if value == api.Value then
+                return
+            end
+            api.Value = value
+            refreshText()
+            paintLimits(0.15)
+            if not state.stepping then
+                aF(cardStroke)
+            end
+            if not silent then
+                aJ(opts.Callback, value)
+            end
         end
-        local function bh(bi)
-            bf = true
-            bd:Set(bd.Value + bi * a1)
-            bf = false
-            ah(a7, { Color = z.StrokeHover }, 0.08)
+        function api:Get()
+            return api.Value
+        end
+
+        -- next value on the step grid in `direction`; `count` steps at once (the range ends are always reachable)
+        local function stepTarget(direction, count)
+            local index = (api.Value - minV) / step
+            if direction > 0 then
+                index = math.floor(index + 1e-6) + count
+            else
+                index = math.ceil(index - 1e-6) - count
+            end
+            return num.snap(minV + index * step)
+        end
+        local function nudge(direction, count)
+            if state.disabled or api._destroyed then
+                return false
+            end
+            local target = stepTarget(direction, count)
+            if target == api.Value then
+                return false
+            end
+            state.stepping = true
+            api:Set(target)
+            state.stepping = false
+            ah(chipStroke, { Color = z.StrokeHover }, 0.08)
             task.delay(0.12, function()
-                ah(a7, { Color = z.Stroke }, 0.2)
+                if not api._destroyed then
+                    paintStroke(0.2)
+                end
             end)
+            return true
         end
-        local function bi(bj, bk)
-            local bl = false
-            local holdId = 0
-            bj.InputBegan:Connect(function(bm)
-                if not aw(bm) then
+        local function shiftMultiplier()
+            local ok, down = pcall(function()
+                return b:IsKeyDown(Enum.KeyCode.LeftShift) or b:IsKeyDown(Enum.KeyCode.RightShift)
+            end)
+            return ok and down and 10 or 1
+        end
+        -- long holds on wide ranges move in bigger strides
+        local function holdMultiplier(ticks)
+            if (maxV - minV) / step < 50 then
+                return 1
+            end
+            if ticks >= 40 then
+                return 10
+            elseif ticks >= 20 then
+                return 4
+            end
+            return 1
+        end
+        local function bindHold(button, direction)
+            local held, holdId, repeated = false, 0, false
+            local canTap = ay(button, function()
+                return button:FindFirstAncestorWhichIsA("ScrollingFrame")
+            end)
+            button.InputBegan:Connect(function(input)
+                if not aw(input) or state.disabled then
                     return
                 end
-                bl = true
+                local touch = input.UserInputType == Enum.UserInputType.Touch
+                held, repeated = true, false
                 holdId += 1
                 local myId = holdId
-                bh(bk)
+                if not touch then
+                    nudge(direction, shiftMultiplier())
+                end
                 task.delay(0.4, function()
-                    while bl and holdId == myId do
-                        bh(bk)
-                        task.wait(0.07)
+                    if not (held and holdId == myId) or not canTap() then
+                        return
+                    end
+                    repeated = true
+                    local ticks = 0
+                    while held and holdId == myId and canTap() do
+                        if not nudge(direction, math.max(holdMultiplier(ticks), shiftMultiplier())) then
+                            break
+                        end
+                        ticks += 1
+                        task.wait(ticks >= 20 and 0.05 or 0.07)
                     end
                 end)
             end)
-            bj.InputEnded:Connect(function(bm)
-                if aw(bm) then
-                    bl = false
+            button.InputEnded:Connect(function(input)
+                if not aw(input) then
+                    return
                 end
+                -- a touch that started a page scroll must not change the value; a plain tap steps on release
+                if held and not repeated and input.UserInputType == Enum.UserInputType.Touch and canTap() then
+                    nudge(direction, 1)
+                end
+                held = false
             end)
-            bj.MouseLeave:Connect(function()
-                bl = false
+            button.MouseLeave:Connect(function()
+                held = false
             end)
         end
-        bi(a9, -1)
-        bi(bb, 1)
-        bg()
-        task.defer(bc, true)
-        return m(self, aU, bd, aV, "Stepper")
+        bindHold(minusBtn, -1)
+        bindHold(plusBtn, 1)
+
+        -- typing a value: "12", "12.5", "12,5", or with the suffix ("50%")
+        local function parseTyped(text)
+            text = tostring(text):gsub(",", "."):gsub("%s", "")
+            local bare = suffix:gsub("%s", "")
+            if bare ~= "" and text:lower():sub(-#bare) == bare:lower() then
+                text = text:sub(1, #text - #bare)
+            end
+            return tonumber(text:match("^[%+%-]?%d*%.?%d*$"))
+        end
+        box.Focused:Connect(function()
+            if state.disabled then
+                box:ReleaseFocus()
+                return
+            end
+            state.editing = true
+            refreshText()
+            paintStroke(0.12)
+            fit(true)
+            task.defer(function()
+                if box:IsFocused() then
+                    box.SelectionStart = 1
+                    box.CursorPosition = #box.Text + 1
+                end
+            end)
+        end)
+        box.FocusLost:Connect(function(enterPressed, inputObject)
+            local cancelled = inputObject ~= nil and inputObject.KeyCode == Enum.KeyCode.Escape
+            local typed = box.Text
+            state.editing = false
+            if not cancelled then
+                local parsed = parseTyped(typed)
+                if parsed then
+                    api:Set(parsed)
+                end
+            end
+            refreshText()
+            paintStroke(0.2)
+            fit(false)
+        end)
+
+        function api:SetRange(newMin, newMax, newStep, silent)
+            newMin = finite(newMin, minV)
+            newMax = finite(newMax, maxV)
+            if newMin > newMax then
+                newMin, newMax = newMax, newMin
+            end
+            minV, maxV = newMin, newMax
+            newStep = finite(newStep, nil)
+            if newStep and newStep > 0 then
+                step = newStep
+            end
+            num = aL(minV, maxV, step)
+            local clamped = num.snap(api.Value)
+            local changed = clamped ~= api.Value
+            api.Value = clamped
+            refreshText()
+            paintLimits(0.15)
+            if changed and not silent then
+                aJ(opts.Callback, clamped)
+            end
+        end
+        function api:SetSuffix(text)
+            suffix = text ~= nil and tostring(text) or ""
+            refreshText()
+        end
+        function api:SetDisabled(v)
+            state.disabled = v == true
+            if state.disabled and box:IsFocused() then
+                box:ReleaseFocus()
+            end
+            box.TextEditable = not state.disabled
+            paintDisabled(0.15)
+        end
+        function api:IsDisabled()
+            return state.disabled
+        end
+        function api:SetText(text)
+            text = tostring(text)
+            titleLbl.Text = text
+            api._searchName = text
+            api._searchKey = string.lower(text)
+        end
+        function api:SetDesc(text)
+            if descLbl then
+                descLbl.Text = tostring(text)
+            end
+        end
+        api._onHide = function()
+            if box:IsFocused() then
+                box:ReleaseFocus()
+            end
+        end
+
+        refreshText()
+        paintDisabled(0)
+        paintStroke(0)
+        task.defer(fit, true)
+        return m(self, opts, api, card, "Stepper")
     end
     -- Shared helpers for Progress / Status / StatusList / Table.
     -- Stored on `k` (not as new locals) because the enclosing function is close to Luau's 200-local limit.
