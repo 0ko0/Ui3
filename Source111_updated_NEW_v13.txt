@@ -1099,7 +1099,7 @@ local a = (function()
     k.Touch = E
     local F = 188
     local G = 72
-    local H = 34
+    local H = E and 40 or 34
     local I = E and 54 or 48
     local J = E and 70 or 64
     local K = E and 40 or 34
@@ -7824,259 +7824,7 @@ local a = (function()
         task.defer(fit, true)
         return m(self, opts, api, frame, "Keybind")
     end
-    -- ===== ColorPicker wheel =====
-    -- One PNG (hue = angle, saturation = radius, full brightness) shared by every ColorPicker. It is built here in
-    -- pure Lua (stored deflate blocks + CRC32 + Adler32), written once with the executor's writefile and loaded with
-    -- getcustomasset, so there is no download and no asset id that can expire. Brightness is a black disc laid over
-    -- the image, so the file never has to change. Executors without writefile / isfile / getcustomasset get a fan of
-    -- gradient spokes made of plain frames instead.
-    do
-        local Wheel = { State = "idle", Asset = nil, Waiters = {}, Size = 256, Folder = "AirFlowAssets" }
-        k._ColorWheel = Wheel
-        local WHITE = Color3.fromRGB(255, 255, 254)
-
-        local function pngLength(size)
-            local raw = size * (1 + size * 4)
-            return 8 + 25 + (12 + raw + math.ceil(raw / 65535) * 5 + 6) + 12
-        end
-
-        -- must run inside a thread that can yield (it pauses now and then so the first build does not hitch a frame)
-        local function buildPng(size)
-            local band, bxor, rshift = bit32.band, bit32.bxor, bit32.rshift
-            local char, byte = string.char, string.byte
-            local ticks = 0
-            local function pause()
-                ticks += 1
-                if ticks % 24 == 0 then
-                    task.wait()
-                end
-            end
-
-            local crcTable = {}
-            for n = 0, 255 do
-                local c = n
-                for _ = 1, 8 do
-                    if band(c, 1) == 1 then
-                        c = bxor(rshift(c, 1), 0xEDB88320)
-                    else
-                        c = rshift(c, 1)
-                    end
-                end
-                crcTable[n] = c
-            end
-            local function crc32(text)
-                local c = 0xFFFFFFFF
-                local length = #text
-                local from = 1
-                while from <= length do
-                    local to = math.min(from + 3999, length)
-                    local bytes = { byte(text, from, to) }
-                    for n = 1, #bytes do
-                        c = bxor(crcTable[bxor(band(c, 255), bytes[n])], rshift(c, 8))
-                    end
-                    from = to + 1
-                    pause()
-                end
-                return bxor(c, 0xFFFFFFFF)
-            end
-            local function adler32(text)
-                local a, b = 1, 0
-                local length = #text
-                local from = 1
-                while from <= length do
-                    local to = math.min(from + 3999, length)
-                    local bytes = { byte(text, from, to) }
-                    for n = 1, #bytes do
-                        a += bytes[n]
-                        b += a
-                    end
-                    a %= 65521
-                    b %= 65521
-                    from = to + 1
-                    pause()
-                end
-                return b * 65536 + a
-            end
-            local function u32(n)
-                return char(band(rshift(n, 24), 255), band(rshift(n, 16), 255), band(rshift(n, 8), 255), band(n, 255))
-            end
-            local function chunk(kind, data)
-                return u32(#data) .. kind .. data .. u32(crc32(kind .. data))
-            end
-
-            -- RGBA rows (each starts with filter type 0). The rim is anti-aliased through the alpha channel.
-            local radius = size / 2
-            local turn = math.pi * 2
-            local rows = {}
-            for y = 0, size - 1 do
-                local row = { 0 }
-                local count = 1
-                local dy = radius - (y + 0.5)
-                for x = 0, size - 1 do
-                    local dx = (x + 0.5) - radius
-                    local dist = math.sqrt(dx * dx + dy * dy)
-                    local cover = radius - dist + 0.5
-                    local r, g, b, a = 0, 0, 0, 0
-                    if cover > 0 then
-                        if cover > 1 then
-                            cover = 1
-                        end
-                        local sat = dist / radius
-                        if sat > 1 then
-                            sat = 1
-                        end
-                        local scaled = ((math.atan2(dy, dx) / turn) % 1) * 6
-                        local sector = math.floor(scaled)
-                        local fraction = scaled - sector
-                        local p, q, t = 1 - sat, 1 - sat * fraction, 1 - sat * (1 - fraction)
-                        if sector == 0 then
-                            r, g, b = 1, t, p
-                        elseif sector == 1 then
-                            r, g, b = q, 1, p
-                        elseif sector == 2 then
-                            r, g, b = p, 1, t
-                        elseif sector == 3 then
-                            r, g, b = p, q, 1
-                        elseif sector == 4 then
-                            r, g, b = t, p, 1
-                        else
-                            r, g, b = 1, p, q
-                        end
-                        r, g, b = math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5)
-                        a = math.floor(cover * 255 + 0.5)
-                    end
-                    row[count + 1], row[count + 2], row[count + 3], row[count + 4] = r, g, b, a
-                    count += 4
-                end
-                rows[y + 1] = char(table.unpack(row))
-                if y % 16 == 15 then
-                    task.wait()
-                end
-            end
-            local raw = table.concat(rows)
-
-            -- zlib stream made of stored (uncompressed) deflate blocks of up to 65535 bytes
-            local blocks, at, total = {}, 1, #raw
-            while at <= total do
-                local length = math.min(65535, total - at + 1)
-                local inverse = bxor(length, 0xFFFF)
-                blocks[#blocks + 1] = char(at + length > total and 1 or 0, band(length, 255), rshift(length, 8), band(inverse, 255), rshift(inverse, 8))
-                    .. raw:sub(at, at + length - 1)
-                at += length
-            end
-            local zlib = "\120\1" .. table.concat(blocks) .. u32(adler32(raw))
-            return "\137PNG\r\n\26\n"
-                .. chunk("IHDR", u32(size) .. u32(size) .. char(8, 6, 0, 0, 0))
-                .. chunk("IDAT", zlib)
-                .. chunk("IEND", "")
-        end
-
-        -- returns a content id for the wheel image, or nil when this executor cannot do files / custom assets
-        local function load()
-            local host = k._host
-            local writeFn = host.First("writefile", "write_file")
-            local isFileFn = host.First("isfile", "is_file")
-            local assetFn = host.First("getcustomasset", "getsynasset")
-            if not (writeFn and isFileFn and assetFn) then
-                return nil
-            end
-            local readFn = host.First("readfile", "read_file")
-            local makeFolderFn = host.First("makefolder", "make_folder")
-            local isFolderFn = host.First("isfolder", "is_folder")
-            pcall(function()
-                if makeFolderFn and isFolderFn and not isFolderFn(Wheel.Folder) then
-                    makeFolderFn(Wheel.Folder)
-                end
-            end)
-            local path = Wheel.Folder .. "/colorwheel_" .. Wheel.Size .. "_v1.png"
-            -- a file that is missing or has the wrong size (half written, edited) is built again
-            local function usable()
-                local ok, exists = pcall(isFileFn, path)
-                if not (ok and exists) then
-                    return false
-                end
-                if not readFn then
-                    return true
-                end
-                local readOk, data = pcall(readFn, path)
-                return readOk and type(data) == "string" and #data == pngLength(Wheel.Size)
-            end
-            if not usable() then
-                local built, png = pcall(buildPng, Wheel.Size)
-                if not built or type(png) ~= "string" then
-                    return nil
-                end
-                if not pcall(writeFn, path, png) then
-                    return nil
-                end
-            end
-            local ok, id = pcall(assetFn, path)
-            if ok and type(id) == "string" and id ~= "" then
-                return id
-            end
-            return nil
-        end
-
-        -- callback(asset) gets the content id, or nil when the picker has to draw its own wheel
-        function Wheel.Acquire(callback)
-            if Wheel.State == "ready" then
-                callback(Wheel.Asset)
-                return
-            elseif Wheel.State == "failed" then
-                callback(nil)
-                return
-            end
-            table.insert(Wheel.Waiters, callback)
-            if Wheel.State == "building" then
-                return
-            end
-            Wheel.State = "building"
-            task.spawn(function()
-                local ok, asset = pcall(load)
-                if ok and asset then
-                    Wheel.State, Wheel.Asset = "ready", asset
-                else
-                    Wheel.State = "failed"
-                end
-                local waiters = Wheel.Waiters
-                Wheel.Waiters = {}
-                for _, waiter in ipairs(waiters) do
-                    task.spawn(waiter, Wheel.Asset)
-                end
-            end)
-        end
-
-        -- fallback: every spoke is a frame the length of the diameter, so one gradient (hue, white, opposite hue)
-        -- paints two opposite rays. The frame is centred on the wheel, so it turns around the wheel's centre.
-        function Wheel.Spokes(parent, diameter)
-            local COUNT = 48
-            local width = math.ceil(diameter * math.sin(math.pi / (COUNT * 2))) + 2
-            for index = 0, COUNT - 1 do
-                local top = (index + 0.5) / (COUNT * 2)
-                local spoke = ai("Frame", {
-                    AnchorPoint = Vector2.new(0.5, 0.5),
-                    Position = UDim2.fromScale(0.5, 0.5),
-                    Size = UDim2.fromOffset(width, diameter),
-                    Rotation = 90 - top * 360,
-                    BackgroundColor3 = WHITE,
-                    BorderSizePixel = 0,
-                    ZIndex = 1,
-                    Parent = parent,
-                })
-                ai("UIGradient", {
-                    Rotation = 90,
-                    Color = ColorSequence.new({
-                        ColorSequenceKeypoint.new(0, Color3.fromHSV(top, 1, 1)),
-                        ColorSequenceKeypoint.new(0.5, WHITE),
-                        ColorSequenceKeypoint.new(1, Color3.fromHSV((top + 0.5) % 1, 1, 1)),
-                    }),
-                    Parent = spoke,
-                })
-            end
-        end
-    end
     -- ColorPicker: [title] hex [swatch]. Click the row to fold the picker open under it.
-    --   The picker is a hue / saturation wheel with a brightness slider beside it, then the alpha bar when it is on.
     -- Options: Name/Title, Desc/Description, Default/Color/CurrentValue/Value (Color3 or "#RRGGBB"),
     --          Transparency (0 = opaque .. 1, also adds the alpha bar), Alpha (true adds the alpha bar),
     --          Rainbow (true adds a rainbow button that cycles the hue), RainbowSpeed (hue turns per second, default 0.25),
@@ -8180,11 +7928,11 @@ local a = (function()
         local clipboardFn = (typeof(setclipboard) == "function" and setclipboard) or (typeof(toclipboard) == "function" and toclipboard) or nil
 
         ------------------------------------------------------------------ geometry
-        local WHEEL_D, VBAR_W, VAL_GAP, BAR_H, FIELD_H, SWATCH = 140, 14, 18, 10, 28, 18
-        local HANDLE, HANDLE_BIG = 16, 21
-        local wheelY = 6
-        local alphaY = wheelY + WHEEL_D + 14
-        local fieldY = (hasAlpha and (alphaY + BAR_H) or (wheelY + WHEEL_D)) + 14
+        local SV_H, BAR_H, FIELD_H, SWATCH = 118, 10, 28, 18
+        local svY = 2
+        local hueY = svY + SV_H + 12
+        local alphaY = hueY + BAR_H + 10
+        local fieldY = (hasAlpha and (alphaY + BAR_H) or (hueY + BAR_H)) + 14
         local paletteY = fieldY + FIELD_H + 10
         local panelH = (hasPalette and (paletteY + SWATCH) or (fieldY + FIELD_H)) + 12
         local openH = rowH + panelH
@@ -8225,7 +7973,7 @@ local a = (function()
             ClipsDescendants = true,
             Parent = header,
         })
-        aj(swatch, UDim.new(1, 0))
+        aj(swatch, UDim.new(0, 6))
         ak(swatch, z.Stroke)
         local CHECK_A, CHECK_B = Color3.fromRGB(108, 108, 113), Color3.fromRGB(72, 72, 77)
         local function makeChecker(parent, cols, rows, cell)
@@ -8297,78 +8045,53 @@ local a = (function()
             return ring, fill
         end
 
-        -- hue / saturation wheel with the brightness slider beside it; the pair is centred in the panel
-        local stage = ai("Frame", {
-            AnchorPoint = Vector2.new(0.5, 0),
-            Position = UDim2.new(0.5, 0, 0, wheelY),
-            Size = UDim2.fromOffset(WHEEL_D + VAL_GAP + VBAR_W, WHEEL_D),
-            BackgroundTransparency = 1,
-            Parent = body,
-        })
-        local wheel = ai("TextButton", {
-            Size = UDim2.fromOffset(WHEEL_D, WHEEL_D),
-            BackgroundTransparency = 1,
-            Text = "",
-            AutoButtonColor = false,
-            Parent = stage,
-        })
-        -- the picture (or the spokes) lives in a round clip so nothing can poke out of the circle
-        local discHolder = ai("Frame", {
-            Size = UDim2.fromScale(1, 1),
-            BackgroundTransparency = 1,
-            BorderSizePixel = 0,
-            ClipsDescendants = true,
-            ZIndex = 1,
-            Parent = wheel,
-        })
-        aj(discHolder, UDim.new(1, 0))
-        local disc = ai("ImageLabel", {
-            Size = UDim2.fromScale(1, 1),
-            BackgroundTransparency = 1,
-            ImageTransparency = 1,
-            ScaleType = Enum.ScaleType.Stretch,
-            ZIndex = 1,
-            Parent = discHolder,
-        })
-        -- a black disc over the wheel: its transparency is the brightness, so 1 = clear and 0 = fully dark
-        local shade = ai("Frame", {
-            AnchorPoint = Vector2.new(0.5, 0.5),
-            Position = UDim2.fromScale(0.5, 0.5),
-            Size = UDim2.new(1, -2, 1, -2),
-            BackgroundColor3 = BLACK,
-            BackgroundTransparency = 1,
-            BorderSizePixel = 0,
-            ZIndex = 2,
-            Parent = wheel,
-        })
-        aj(shade, UDim.new(1, 0))
-        local rim = ai("Frame", {
-            Size = UDim2.fromScale(1, 1),
-            BackgroundTransparency = 1,
-            BorderSizePixel = 0,
-            ZIndex = 3,
-            Parent = wheel,
-        })
-        aj(rim, UDim.new(1, 0))
-        ak(rim, z.Stroke)
-        local wheelHandle, wheelHandleFill = makeHandle(wheel, HANDLE, 4)
-        wheelHandle.Position = UDim2.fromScale(0.5, 0.5)
-
-        -- brightness slider (top = full brightness, bottom = black)
-        local val = ai("TextButton", {
-            Position = UDim2.fromOffset(WHEEL_D + VAL_GAP, 0),
-            Size = UDim2.fromOffset(VBAR_W, WHEEL_D),
+        -- saturation / value square
+        local sv = ai("TextButton", {
+            Position = UDim2.fromOffset(0, svY),
+            Size = UDim2.new(1, 0, 0, SV_H),
             BackgroundColor3 = WHITE,
             BorderSizePixel = 0,
             Text = "",
             AutoButtonColor = false,
-            Parent = stage,
+            Parent = body,
         })
-        aj(val, UDim.new(1, 0))
-        ak(val, z.Stroke)
-        local valGradient = ai("UIGradient", { Color = ColorSequence.new(WHITE, BLACK), Rotation = 90, Parent = val })
-        local valHandle, valHandleFill = makeHandle(val, HANDLE, 3)
-        valHandle.Position = UDim2.fromScale(0.5, 0)
+        aj(sv, UDim.new(0, 8))
+        ak(sv, z.Stroke)
+        local svHue = ai("UIGradient", { Color = ColorSequence.new(WHITE, Color3.new(1, 0, 0)), Parent = sv })
+        local svShade = ai("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = BLACK, BorderSizePixel = 0, Parent = sv })
+        aj(svShade, UDim.new(0, 8))
+        ai("UIGradient", {
+            Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) }),
+            Rotation = 90,
+            Parent = svShade,
+        })
+        local svHandle, svHandleFill = makeHandle(sv, 14, 3)
+
+        -- hue bar
+        local hue = ai("TextButton", {
+            Position = UDim2.fromOffset(0, hueY),
+            Size = UDim2.new(1, 0, 0, BAR_H),
+            BackgroundColor3 = WHITE,
+            BorderSizePixel = 0,
+            Text = "",
+            AutoButtonColor = false,
+            Parent = body,
+        })
+        aj(hue, UDim.new(1, 0))
+        ai("UIGradient", {
+            Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+                ColorSequenceKeypoint.new(1 / 6, Color3.fromRGB(255, 255, 0)),
+                ColorSequenceKeypoint.new(2 / 6, Color3.fromRGB(0, 255, 0)),
+                ColorSequenceKeypoint.new(3 / 6, Color3.fromRGB(0, 255, 255)),
+                ColorSequenceKeypoint.new(4 / 6, Color3.fromRGB(0, 0, 255)),
+                ColorSequenceKeypoint.new(5 / 6, Color3.fromRGB(255, 0, 255)),
+                ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0)),
+            }),
+            Parent = hue,
+        })
+        local hueHandle, hueHandleFill = makeHandle(hue, 16, 3)
+        hueHandle.Position = UDim2.fromScale(0, 0.5)
 
         -- alpha bar
         local alphaBar, alphaFill, alphaHandle, alphaHandleFill
@@ -8398,7 +8121,7 @@ local a = (function()
                 BackgroundTransparency = 1,
                 Parent = body,
             })
-            alphaHandle, alphaHandleFill = makeHandle(holder, HANDLE, 3)
+            alphaHandle, alphaHandleFill = makeHandle(holder, 16, 3)
             alphaHandle.Position = UDim2.fromScale(1, 0.5)
         end
 
@@ -8467,7 +8190,7 @@ local a = (function()
             ClipsDescendants = true,
             Parent = hexHolder,
         })
-        aj(hexDot, UDim.new(1, 0))
+        aj(hexDot, UDim.new(0, 4))
         ak(hexDot, z.Stroke)
         if hasAlpha then
             makeChecker(hexDot, 4, 4, 4)
@@ -8561,7 +8284,7 @@ local a = (function()
                 Visible = false,
                 Parent = body,
             })
-            aj(button, UDim.new(1, 0))
+            aj(button, UDim.new(0, 5))
             local stroke = ak(button, z.Stroke)
             local entry = { Button = button, Stroke = stroke, Color = nil, Hover = false }
             button.MouseEnter:Connect(function()
@@ -8701,19 +8424,6 @@ local a = (function()
                 handle.Position = position
             end
         end
-        -- the black disc over the wheel: transparency = brightness
-        local shadeTween
-        local function setShade(brightness, dur)
-            if shadeTween then
-                shadeTween:Cancel()
-                shadeTween = nil
-            end
-            if dur > 0 then
-                shadeTween = ah(shade, { BackgroundTransparency = brightness }, dur, Enum.EasingStyle.Quint)
-            else
-                shade.BackgroundTransparency = brightness
-            end
-        end
         local function paint(animate)
             api.Value, api.Transparency = value, 1 - alpha
             swatchFill.BackgroundColor3 = value
@@ -8722,17 +8432,15 @@ local a = (function()
             if not body.Visible then
                 return
             end
-            valGradient.Color = ColorSequence.new(Color3.fromHSV(h, s, 1), BLACK)
-            wheelHandleFill.BackgroundColor3 = value
-            valHandleFill.BackgroundColor3 = value
+            local pure = Color3.fromHSV(h, 1, 1)
+            svHue.Color = ColorSequence.new(WHITE, pure)
+            svHandleFill.BackgroundColor3 = value
+            hueHandleFill.BackgroundColor3 = pure
             hexDotFill.BackgroundColor3 = value
             hexDotFill.BackgroundTransparency = 1 - alpha
             local dur = animate and 0.22 or 0
-            setShade(v, dur)
-            -- hue is the angle (red at the right, counter-clockwise), saturation is the distance from the centre
-            local angle = h * math.pi * 2
-            moveHandle(wheelHandle, UDim2.fromScale(0.5 + 0.5 * s * math.cos(angle), 0.5 - 0.5 * s * math.sin(angle)), dur)
-            moveHandle(valHandle, UDim2.fromScale(0.5, 1 - v), dur)
+            moveHandle(svHandle, UDim2.fromScale(s, 1 - v), dur)
+            moveHandle(hueHandle, UDim2.fromScale(h, 0.5), dur)
             if hasAlpha then
                 alphaFill.BackgroundColor3 = value
                 alphaHandleFill.BackgroundColor3 = value
@@ -8922,24 +8630,6 @@ local a = (function()
         end
 
         ------------------------------------------------------------------ open / close
-        local wheelRequested = false
-        local function ensureWheel()
-            if wheelRequested then
-                return
-            end
-            wheelRequested = true
-            k._ColorWheel.Acquire(function(asset)
-                if not discHolder.Parent then
-                    return
-                end
-                if asset then
-                    disc.Image = asset
-                    ah(disc, { ImageTransparency = 0 }, 0.3)
-                else
-                    k._ColorWheel.Spokes(discHolder, WHEEL_D)
-                end
-            end)
-        end
         local openId = 0
         local function reveal()
             pcall(function()
@@ -8971,7 +8661,6 @@ local a = (function()
             ah(card, { Size = UDim2.new(1, 0, 0, open and openH or rowH) }, 0.35, Enum.EasingStyle.Quint)
             if open then
                 body.Visible = true
-                ensureWheel()
                 layoutFields()
                 layoutPalette()
                 paintMode()
@@ -9017,20 +8706,14 @@ local a = (function()
             end
         end
         local function dragTo(kind, pointer)
-            if kind == "wheel" then
-                local half = math.max(wheel.AbsoluteSize.X / 2, 1)
-                local dx = pointer.X - (wheel.AbsolutePosition.X + half)
-                local dy = pointer.Y - (wheel.AbsolutePosition.Y + wheel.AbsoluteSize.Y / 2)
-                local dist = math.sqrt(dx * dx + dy * dy)
-                s = math.clamp(dist / half, 0, 1)
-                if dist > 1 then
-                    h = math.clamp((math.atan2(-dy, dx) / (math.pi * 2)) % 1, 0, 0.999)
-                end
+            if kind == "sv" then
+                s = math.clamp((pointer.X - sv.AbsolutePosition.X) / math.max(sv.AbsoluteSize.X, 1), 0, 1)
+                v = 1 - math.clamp((pointer.Y - sv.AbsolutePosition.Y) / math.max(sv.AbsoluteSize.Y, 1), 0, 1)
+            elseif kind == "hue" then
+                h = math.clamp((pointer.X - hue.AbsolutePosition.X) / math.max(hue.AbsoluteSize.X, 1), 0, 0.999)
                 if state.rainbow then
                     setRainbow(false, true)
                 end
-            elseif kind == "val" then
-                v = 1 - math.clamp((pointer.Y - val.AbsolutePosition.Y) / math.max(val.AbsoluteSize.Y, 1), 0, 1)
             else
                 alpha = math.clamp((pointer.X - alphaBar.AbsolutePosition.X) / math.max(alphaBar.AbsoluteSize.X, 1), 0, 1)
             end
@@ -9038,7 +8721,7 @@ local a = (function()
             changed(false, false)
         end
         local function handleFor(kind)
-            return kind == "wheel" and wheelHandle or (kind == "val" and valHandle or alphaHandle)
+            return kind == "sv" and svHandle or (kind == "hue" and hueHandle or alphaHandle)
         end
         local function beginDrag(kind, input)
             if state.disabled or state.drag then
@@ -9054,7 +8737,7 @@ local a = (function()
                 end
             end
             local handle = handleFor(kind)
-            ah(handle, { Size = UDim2.fromOffset(HANDLE_BIG, HANDLE_BIG) }, 0.15, Enum.EasingStyle.Quint)
+            ah(handle, { Size = UDim2.fromOffset(kind == "sv" and 19 or 21, kind == "sv" and 19 or 21) }, 0.15, Enum.EasingStyle.Quint)
             dragTo(kind, av())
         end
         local function endDrag()
@@ -9065,24 +8748,18 @@ local a = (function()
             state.drag = nil
             dragInput = nil
             unlockScroll()
-            ah(handleFor(kind), { Size = UDim2.fromOffset(HANDLE, HANDLE) }, 0.22, Enum.EasingStyle.Quint)
+            ah(handleFor(kind), { Size = UDim2.fromOffset(kind == "sv" and 14 or 16, kind == "sv" and 14 or 16) }, 0.22, Enum.EasingStyle.Quint)
             pushRecent(value)
             released()
         end
-        wheel.InputBegan:Connect(function(input)
-            if not aw(input) then
-                return
-            end
-            -- the corners of the square around the wheel are not part of the disc
-            local half = wheel.AbsoluteSize.X / 2
-            local center = wheel.AbsolutePosition + wheel.AbsoluteSize / 2
-            if (av() - center).Magnitude <= half + 6 then
-                beginDrag("wheel", input)
+        sv.InputBegan:Connect(function(input)
+            if aw(input) then
+                beginDrag("sv", input)
             end
         end)
-        val.InputBegan:Connect(function(input)
+        hue.InputBegan:Connect(function(input)
             if aw(input) then
-                beginDrag("val", input)
+                beginDrag("hue", input)
             end
         end)
         if hasAlpha then
@@ -11687,6 +11364,8 @@ local a = (function()
         a7._configListeners = {}
         a7._pendingFlags = {}
         a7.StrictLoad = a8.StrictLoad == true
+        a7._keepTab = a4.RememberTab ~= false and a8.Enabled ~= false
+        a7._tabListeners = {}
         a7.ConfigMigrate = type(a8.Migrate) == "function" and a8.Migrate or nil
         do
             local savedSettings = a7:_readConfigSettings()
@@ -12101,6 +11780,39 @@ local a = (function()
             Parent = bp,
         })
         a7._indicatorStroke = ak(bp, z.Accent, 0.84)
+        -- accent wash that bleeds in from the left edge of the active tab
+        local indicatorTint = ai("Frame", {
+            Name = "Tint",
+            Size = UDim2.fromScale(1, 1),
+            BackgroundColor3 = z.Accent,
+            BackgroundTransparency = 0.8,
+            BorderSizePixel = 0,
+            ZIndex = 1,
+            Parent = bp,
+        })
+        aj(indicatorTint, UDim.new(0, 8))
+        ai("UIGradient", {
+            Rotation = 0,
+            Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 0),
+                NumberSequenceKeypoint.new(0.55, 0.72),
+                NumberSequenceKeypoint.new(1, 1),
+            }),
+            Parent = indicatorTint,
+        })
+        -- soft halo behind the accent pill
+        local indicatorGlow = ai("ImageLabel", {
+            Name = "PillGlow",
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(0, -6, 0.5, 0),
+            Size = UDim2.fromOffset(26, 38),
+            BackgroundTransparency = 1,
+            Image = A.Glow,
+            ImageColor3 = z.Accent,
+            ImageTransparency = 0.7,
+            ZIndex = 1,
+            Parent = bp,
+        })
         local bq = ai(
             "Frame",
             {
@@ -12110,11 +11822,14 @@ local a = (function()
                 BackgroundColor3 = z.Accent,
                 Visible = true,
                 BorderSizePixel = 0,
+                ZIndex = 2,
                 Parent = bp,
             }
         )
         aj(bq, UDim.new(1, 0))
         a7._indicatorPill = bq
+        a7._indicatorTint = indicatorTint
+        a7._indicatorGlow = indicatorGlow
         a7.Indicator = bp
         local br = ai(
             "Frame",
@@ -13202,7 +12917,9 @@ local a = (function()
             ah(a9, { ImageTransparency = 0.6 }, 0.5)
         end
         for bb, bc in ipairs(self.Tabs) do
-            a6(bc._button, 0.1 + bb * 0.05, true)
+            if not bc._hidden and not bc._collapsedHidden then
+                a6(bc._button, 0.1 + bb * 0.05, true)
+            end
         end
         for bb, bc in ipairs(self._tabSections or {}) do
             a6(bc, 0.06 + bb * 0.04, true)
@@ -22814,6 +22531,17 @@ end
             }
         )
         bY:SetAttribute("NoDrag", true)
+        -- mouse wheel scrolls the sub-tab strip sideways when it overflows
+        bY.InputChanged:Connect(function(wheelInput)
+            if wheelInput.UserInputType == Enum.UserInputType.MouseWheel then
+                local wheelScale = math.max(self.Window.Scale.Scale, 0.05)
+                local maxScroll = math.max((bY.AbsoluteCanvasSize.X - bY.AbsoluteWindowSize.X) / wheelScale, 0)
+                if maxScroll > 0 then
+                    local target = math.clamp(bY.CanvasPosition.X - wheelInput.Position.Z * 70, 0, maxScroll)
+                    ah(bY, { CanvasPosition = Vector2.new(target, 0) }, 0.22, Enum.EasingStyle.Quint)
+                end
+            end
+        end)
         local bZ = ai(
             "Frame",
             {
@@ -22830,6 +22558,18 @@ end
         ai(
             "UIGradient",
             { Rotation = 90, Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(170, 170, 170)), Parent = bZ }
+        )
+        aj(
+            ai("Frame", {
+                Name = "Tint",
+                Size = UDim2.fromScale(1, 1),
+                BackgroundColor3 = z.Accent,
+                BackgroundTransparency = 0.9,
+                BorderSizePixel = 0,
+                ZIndex = 1,
+                Parent = bZ,
+            }),
+            UDim.new(0, 7)
         )
         aj(
             ai(
@@ -22921,6 +22661,14 @@ end
                 bY.Moving = false
             end)
         end
+        -- the accent underline springs open every time the selection moves
+        if not bX then
+            local underline = bY.Highlight:FindFirstChild("Underline")
+            if underline then
+                underline.Size = UDim2.fromOffset(6, 2)
+                ah(underline, { Size = UDim2.fromOffset(22, 2) }, 0.5, Enum.EasingStyle.Back)
+            end
+        end
         local b3 = bY.Strip.AbsoluteSize.X / bZ
         local b4 = bY.Strip.CanvasPosition.X
         if b1 < b4 then
@@ -22929,9 +22677,9 @@ end
             ah(bY.Strip, { CanvasPosition = Vector2.new(b1 + b0 - b3 + 8, 0) }, 0.3, Enum.EasingStyle.Quint)
         end
     end
-    function aS:SetBadge(badgeValue)
+    function aS:SetBadge(badgeValue, tone)
         if self._setBadge then
-            self._setBadge(badgeValue)
+            self._setBadge(badgeValue, tone)
         end
         return self
     end
@@ -23020,8 +22768,12 @@ end
             Parent = b1,
         })
         do
-            local subBadge, subBadgeText
-            b_._setBadge = function(badgeValue)
+            -- Badge: text, number or `true` (a small dot); second argument / BadgeTone picks the colour
+            local subBadge, subBadgeText, subBadgeStroke, subBadgePad, subBadgeScale
+            b_._setBadge = function(badgeValue, tone)
+                if tone ~= nil then
+                    b_.BadgeTone = tone
+                end
                 if badgeValue == nil or badgeValue == false or tostring(badgeValue) == "" then
                     if subBadge then
                         subBadge.Visible = false
@@ -23029,6 +22781,9 @@ end
                     b_.Badge = nil
                     return
                 end
+                local isDot = badgeValue == true
+                local badgeString = isDot and "" or tostring(badgeValue)
+                local toneColor = k._badgeTone(b_.BadgeTone)
                 if not subBadge then
                     subBadge = ai("Frame", {
                         Name = "Badge",
@@ -23041,8 +22796,9 @@ end
                         Parent = b1,
                     })
                     aj(subBadge, UDim.new(1, 0))
-                    ak(subBadge, z.Accent, 0.72)
-                    al(subBadge, 6, 6, 0, 0)
+                    subBadgeStroke = ak(subBadge, z.Accent, 0.72)
+                    subBadgePad = al(subBadge, 6, 6, 0, 0)
+                    subBadgeScale = ai("UIScale", { Parent = subBadge })
                     subBadgeText = am({
                         Size = UDim2.new(0, 0, 1, 0),
                         AutomaticSize = Enum.AutomaticSize.X,
@@ -23054,15 +22810,33 @@ end
                         Parent = subBadge,
                     })
                 end
-                subBadgeText.Text = tostring(badgeValue)
+                local stored = isDot and true or badgeString
+                local changed = b_.Badge ~= stored
+                b_.Badge = stored
+                subBadgePad.PaddingLeft = UDim.new(0, isDot and 0 or 6)
+                subBadgePad.PaddingRight = UDim.new(0, isDot and 0 or 6)
+                subBadge.AutomaticSize = isDot and Enum.AutomaticSize.None or Enum.AutomaticSize.X
+                subBadge.Size = isDot and UDim2.fromOffset(8, 8) or UDim2.fromOffset(0, 16)
+                subBadgeText.Visible = not isDot
+                subBadgeText.Text = badgeString
                 subBadge.Visible = true
-                b_.Badge = tostring(badgeValue)
+                ah(subBadge, { BackgroundColor3 = toneColor, BackgroundTransparency = isDot and 0 or 0.86 }, 0.2)
+                ah(subBadgeStroke, { Color = toneColor, Transparency = isDot and 1 or 0.72 }, 0.2)
+                ah(subBadgeText, { TextColor3 = toneColor }, 0.2)
+                if changed then
+                    subBadgeScale.Scale = 0.55
+                    ah(subBadgeScale, { Scale = 1 }, 0.4, Enum.EasingStyle.Back)
+                end
             end
             if bW.Badge ~= nil then
-                b_._setBadge(bW.Badge)
+                b_._setBadge(bW.Badge, bW.BadgeTone or bW.BadgeColor)
             end
         end
         b_._button = b1
+        local subPress = ai("UIScale", { Parent = b1 })
+        local function subRelease()
+            ah(subPress, { Scale = 1 }, 0.3, Enum.EasingStyle.Quint)
+        end
         b1.MouseEnter:Connect(function()
             if self.CurrentSubTab ~= b_ then
                 ah(b_._label, { TextColor3 = z.Text }, 0.12)
@@ -23073,6 +22847,7 @@ end
             end
         end)
         b1.MouseLeave:Connect(function()
+            subRelease()
             if self.CurrentSubTab ~= b_ then
                 ah(b_._label, { TextColor3 = z.Muted }, 0.2)
                 ah(b1, { BackgroundTransparency = 1 }, 0.2)
@@ -23081,11 +22856,19 @@ end
                 end
             end
         end)
+        b1.MouseButton1Down:Connect(function()
+            ah(subPress, { Scale = 0.95 }, 0.12, Enum.EasingStyle.Quint)
+        end)
+        b1.MouseButton1Up:Connect(subRelease)
         b1.MouseButton1Click:Connect(function()
+            subRelease()
             self:SelectSubTab(b_)
         end)
         table.insert(self._subTabs, b_)
         if bZ == 1 then
+            self:SelectSubTab(b_, true)
+        elseif self.Window:_tabStateLoad().Sub[self.Name] == b_.Name and self.CurrentSubTab ~= b_ then
+            -- the page the user had open last time (kept through the executor file API)
             self:SelectSubTab(b_, true)
         end
         return b_
@@ -23111,6 +22894,9 @@ end
         self.Window:_resetSearch()
         self.Window:_closePopups()
         self.CurrentSubTab = bW
+        if not bX then
+            self.Window:_noteSubTab(self, bW)
+        end
         local bZ = self._sub
         bU(bZ)
         bV(bZ)
@@ -23203,7 +22989,7 @@ end
                 and b_._type ~= "Divider"
                 and (b_._isShown == nil or b_:_isShown())
         end
-        for b_, b0 in ipairs(self.Tabs) do
+        for b_, b0 in ipairs(self:_visibleTabs()) do
             bY(b0.Name, { Kind = "Tab", Tab = b0, Icon = b0._iconName })
             for b1, b2 in ipairs(b0._subTabs or { b0 }) do
                 local b3 = b2._isSubTab and b2 or nil
@@ -24781,7 +24567,7 @@ end
     }
     function a2:_featureGroups()
         local bY, bZ = {}, {}
-        for b_, b0 in ipairs(self.Tabs) do
+        for b_, b0 in ipairs(self:_visibleTabs()) do
             if b0 ~= self.Home and b0._userVisible ~= false then
                 local b1 = { Name = b0.Name, Icon = b0._iconName, Items = {} }
                 for b2, b3 in ipairs(b0._subTabs or { b0 }) do
@@ -25605,12 +25391,211 @@ end
         end)
         return b_
     end
+    -- ===== TAB SYSTEM v2 =====
+    -- Sidebar tabs, tab sections and sub-tabs.
+    --  * executor file API (a2._fs*) remembers the last open tab / sub-tab / collapsed sections between
+    --    executions (Window option RememberTab = false or ConfigurationSaving.Enabled = false turns it off)
+    --  * Tab options: Name, Icon, Desc, PageTitle, EmptyText, Badge, BadgeTone, Visible, Disabled
+    --    Badge can be text, a number or `true` (pulsing dot); BadgeTone = Accent / Success / Warning / Error / Color3
+    --  * TabSection options: Name, Collapsible (default true), Collapsed. Click a section title to fold its tabs.
+    --  * Tab methods: Select, SetName, SetIcon, SetBadge, GetBadge, SetVisible, IsVisible, SetDisabled, IsDisabled
+    --  * Window methods: SelectTab (tab / name / index), NextTab, PreviousTab, GetTab, GetTabs, OnTabChanged
+    --  * Ctrl+Tab / Ctrl+Shift+Tab cycle through the tabs while the window is open
+    function k._badgeTone(tone)
+        if typeof(tone) == "Color3" then
+            return tone
+        end
+        if type(tone) == "string" then
+            local key = string.lower(tone)
+            if key == "success" or key == "green" or key == "ok" then
+                return z.Success
+            elseif key == "warning" or key == "warn" or key == "orange" or key == "yellow" then
+                return z.Warning
+            elseif key == "error" or key == "danger" or key == "red" then
+                return z.Error
+            end
+        end
+        return z.Accent
+    end
+    function a2:_tabStateLoad()
+        if self._tabState then
+            return self._tabState
+        end
+        local state = { Tab = nil, Sub = {}, Collapsed = {} }
+        self._tabState = state
+        if self._keepTab and a2._fsAvailable() then
+            local okRead, saved = pcall(function()
+                return self:_readConfigSettings().TabState
+            end)
+            if okRead and type(saved) == "table" then
+                if type(saved.Tab) == "string" then
+                    state.Tab = saved.Tab
+                end
+                if type(saved.Sub) == "table" then
+                    for tabName, subName in pairs(saved.Sub) do
+                        if type(tabName) == "string" and type(subName) == "string" then
+                            state.Sub[tabName] = subName
+                        end
+                    end
+                end
+                if type(saved.Collapsed) == "table" then
+                    for sectionName, flag in pairs(saved.Collapsed) do
+                        if type(sectionName) == "string" and type(flag) == "boolean" then
+                            state.Collapsed[sectionName] = flag
+                        end
+                    end
+                end
+            end
+        end
+        return state
+    end
+    function a2:_tabStateSave()
+        if not self._keepTab or self._destroyed or self._tabSaving or not a2._fsAvailable() then
+            return
+        end
+        self._tabSaving = true
+        task.delay(0.6, function()
+            self._tabSaving = false
+            local state = self._tabState
+            if self._destroyed or not state then
+                return
+            end
+            pcall(function()
+                self:_writeConfigSettings({
+                    TabState = { Tab = state.Tab, Sub = state.Sub, Collapsed = state.Collapsed },
+                })
+            end)
+        end)
+    end
+    function a2:_noteTab(tab)
+        local state = self:_tabStateLoad()
+        if state.Tab ~= tab.Name then
+            state.Tab = tab.Name
+            self:_tabStateSave()
+        end
+    end
+    function a2:_noteSubTab(tab, sub)
+        local state = self:_tabStateLoad()
+        if state.Sub[tab.Name] ~= sub.Name then
+            state.Sub[tab.Name] = sub.Name
+            self:_tabStateSave()
+        end
+    end
+    function a2:_noteSection(name, collapsed)
+        local state = self:_tabStateLoad()
+        if state.Collapsed[name] ~= collapsed then
+            state.Collapsed[name] = collapsed
+            self:_tabStateSave()
+        end
+    end
+    function a2:_startTab()
+        local wanted = self:_tabStateLoad().Tab
+        if not wanted then
+            return nil
+        end
+        for _, tab in ipairs(self.Tabs) do
+            if tab.Name == wanted and not tab._hidden and not tab._disabled then
+                return tab
+            end
+        end
+        return nil
+    end
+    function a2:_visibleTabs()
+        local list = {}
+        for _, tab in ipairs(self.Tabs) do
+            if not tab._hidden and not tab._disabled then
+                table.insert(list, tab)
+            end
+        end
+        return list
+    end
+    function a2:_stepTab(from, direction)
+        local list = self.Tabs
+        local count = #list
+        if count == 0 then
+            return nil
+        end
+        local start = table.find(list, from) or (direction > 0 and 0 or count + 1)
+        for step = 1, count do
+            local tab = list[((start - 1 + direction * step) % count) + 1]
+            if tab ~= from and not tab._hidden and not tab._disabled then
+                return tab
+            end
+        end
+        return nil
+    end
+    function a2:StepTab(direction)
+        local target = self:_stepTab(self.CurrentTab, direction >= 0 and 1 or -1)
+        if target then
+            self._tabTouched = true
+            self:SelectTab(target)
+        end
+        return target
+    end
+    function a2:NextTab()
+        return self:StepTab(1)
+    end
+    function a2:PreviousTab()
+        return self:StepTab(-1)
+    end
+    function a2:GetTab(which)
+        for index, tab in ipairs(self.Tabs) do
+            if index == which or tab.Name == which then
+                return tab
+            end
+        end
+        if type(which) == "string" then
+            local lowered = string.lower(which)
+            for _, tab in ipairs(self.Tabs) do
+                if string.lower(tab.Name) == lowered then
+                    return tab
+                end
+            end
+        end
+        return nil
+    end
+    function a2:GetTabs()
+        return table.clone(self.Tabs)
+    end
+    function a2:OnTabChanged(callback)
+        if type(callback) ~= "function" then
+            return function() end
+        end
+        self._tabListeners = self._tabListeners or {}
+        table.insert(self._tabListeners, callback)
+        return function()
+            local index = table.find(self._tabListeners, callback)
+            if index then
+                table.remove(self._tabListeners, index)
+            end
+        end
+    end
+    function a2:_bindTabKeys()
+        if self._tabKeysBound then
+            return
+        end
+        self._tabKeysBound = true
+        self:_listen("Began", function(input, processed)
+            if processed or input.KeyCode ~= Enum.KeyCode.Tab or self._destroyed or not self.Open or self.Minimized then
+                return
+            end
+            local ctrl = (self.Keybind ~= Enum.KeyCode.LeftControl and b:IsKeyDown(Enum.KeyCode.LeftControl))
+                or (self.Keybind ~= Enum.KeyCode.RightControl and b:IsKeyDown(Enum.KeyCode.RightControl))
+            if not ctrl or b:GetFocusedTextBox() then
+                return
+            end
+            local shift = b:IsKeyDown(Enum.KeyCode.LeftShift) or b:IsKeyDown(Enum.KeyCode.RightShift)
+            self:StepTab(shift and -1 or 1)
+        end)
+    end
     function a2:Tab(bZ, b_)
         bZ = l(bZ, { Title = "Name", Description = "Desc" })
         if b_ ~= nil and bZ.Icon == nil then
             bZ.Icon = b_
         end
+        local window = self
         local b0 = setmetatable({ Name = bZ.Name or "Tab", Window = self, _order = 0 }, aS)
+        local section = self._currentTabSection
         local b1 = ai(
             "TextButton",
             {
@@ -25620,20 +25605,29 @@ end
                 Text = "",
                 AutoButtonColor = false,
                 LayoutOrder = (#self.Tabs + 1) * 10,
-                Parent = self._currentSection and self._currentSection._body or self._tabStack,
+                Parent = self._tabStack,
             }
         )
         aj(b1, UDim.new(0, 8))
-        local b2 = ak(b1, z.Stroke, 1)
-        b2.Enabled = false
+        local b2 = ak(b1, z.StrokeHover, 1)
         b0._button = b1
-        if self._currentSection then
-            b0._section = self._currentSection
-            table.insert(self._currentSection._tabs, b0)
-            self._currentSection._refresh()
-        end
+        b0._stroke = b2
         local b3 = bZ.Icon ~= nil
+        local headIcon
         if b3 then
+            -- glow that lights up behind the icon of the active tab
+            b0._aura = ai("ImageLabel", {
+                Name = "IconAura",
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0, 20, 0.5, 0),
+                Size = UDim2.fromOffset(42, 42),
+                BackgroundTransparency = 1,
+                Image = A.Glow,
+                ImageColor3 = z.Accent,
+                ImageTransparency = 1,
+                ZIndex = 1,
+                Parent = b1,
+            })
             local b5 = ai(
                 "ImageLabel",
                 {
@@ -25643,6 +25637,7 @@ end
                     BackgroundTransparency = 1,
                     ImageColor3 = z.Muted,
                     ScaleType = Enum.ScaleType.Fit,
+                    ZIndex = 2,
                     Parent = b1,
                 }
             )
@@ -25658,23 +25653,57 @@ end
             Text = b0.Name,
             TextSize = 13,
             TextColor3 = z.Muted,
+            ZIndex = 2,
             Parent = b1,
         })
         do
-            local tabBadge, tabBadgeText
+            -- Badge: text, number or `true` (pulsing dot). BadgeTone / second SetBadge argument picks the colour.
+            local badgeFrame, badgeText, badgeStroke, badgePad, badgeScale, badgeRing
             local labelPad = b3 and 46 or 22
-            b0._setBadge = function(badgeValue)
-                if badgeValue == nil or badgeValue == false or tostring(badgeValue) == "" then
-                    if tabBadge then
-                        tabBadge.Visible = false
-                    end
-                    b0._label.Size = UDim2.new(1, -labelPad, 1, 0)
-                    b0.Badge = nil
+            local pulseRunning = false
+            local function pulse()
+                if pulseRunning then
                     return
                 end
-                local badgeText = tostring(badgeValue)
-                if not tabBadge then
-                    tabBadge = ai("Frame", {
+                pulseRunning = true
+                task.spawn(function()
+                    while not window._destroyed and badgeRing and badgeRing.Parent and b0._badgeDot do
+                        if window.Open and not window.Minimized then
+                            badgeRing.Size = UDim2.fromOffset(8, 8)
+                            badgeRing.BackgroundTransparency = 0.55
+                            ah(
+                                badgeRing,
+                                { Size = UDim2.fromOffset(22, 22), BackgroundTransparency = 1 },
+                                1.1,
+                                Enum.EasingStyle.Quad
+                            )
+                        end
+                        task.wait(1.7)
+                    end
+                    pulseRunning = false
+                end)
+            end
+            b0._setBadge = function(badgeValue, tone)
+                if tone ~= nil then
+                    b0.BadgeTone = tone
+                end
+                if badgeValue == nil or badgeValue == false or tostring(badgeValue) == "" then
+                    b0.Badge = nil
+                    b0._badgeDot = false
+                    if badgeFrame then
+                        badgeFrame.Visible = false
+                    end
+                    if badgeRing then
+                        badgeRing.Visible = false
+                    end
+                    b0._label.Size = UDim2.new(1, -labelPad, 1, 0)
+                    return
+                end
+                local isDot = badgeValue == true
+                local badgeString = isDot and "" or tostring(badgeValue)
+                local toneColor = k._badgeTone(b0.BadgeTone)
+                if not badgeFrame then
+                    badgeFrame = ai("Frame", {
                         Name = "Badge",
                         AnchorPoint = Vector2.new(1, 0.5),
                         Position = UDim2.new(1, -10, 0.5, 0),
@@ -25683,13 +25712,14 @@ end
                         BackgroundColor3 = z.Accent,
                         BackgroundTransparency = 0.86,
                         BorderSizePixel = 0,
-                        ZIndex = 2,
+                        ZIndex = 3,
                         Parent = b1,
                     })
-                    aj(tabBadge, UDim.new(1, 0))
-                    ak(tabBadge, z.Accent, 0.72)
-                    al(tabBadge, 6, 6, 0, 0)
-                    tabBadgeText = am({
+                    aj(badgeFrame, UDim.new(1, 0))
+                    badgeStroke = ak(badgeFrame, z.Accent, 0.72)
+                    badgePad = al(badgeFrame, 6, 6, 0, 0)
+                    badgeScale = ai("UIScale", { Parent = badgeFrame })
+                    badgeText = am({
                         Size = UDim2.new(0, 0, 1, 0),
                         AutomaticSize = Enum.AutomaticSize.X,
                         TextSize = 10,
@@ -25697,17 +25727,55 @@ end
                         TextColor3 = z.Accent,
                         TextTruncate = Enum.TextTruncate.None,
                         TextXAlignment = Enum.TextXAlignment.Center,
-                        ZIndex = 2,
-                        Parent = tabBadge,
+                        ZIndex = 3,
+                        Parent = badgeFrame,
                     })
                 end
-                tabBadgeText.Text = badgeText
-                tabBadge.Visible = true
-                b0.Badge = badgeText
-                b0._label.Size = UDim2.new(1, -(labelPad + math.max(#badgeText * 6 + 12, 18)), 1, 0)
+                local stored = isDot and true or badgeString
+                local changed = b0.Badge ~= stored
+                b0.Badge = stored
+                b0._badgeDot = isDot
+                badgePad.PaddingLeft = UDim.new(0, isDot and 0 or 6)
+                badgePad.PaddingRight = UDim.new(0, isDot and 0 or 6)
+                badgeFrame.AutomaticSize = isDot and Enum.AutomaticSize.None or Enum.AutomaticSize.X
+                badgeFrame.Size = isDot and UDim2.fromOffset(8, 8) or UDim2.fromOffset(0, 16)
+                badgeFrame.Position = UDim2.new(1, isDot and -14 or -10, 0.5, 0)
+                badgeText.Visible = not isDot
+                badgeText.Text = badgeString
+                badgeFrame.Visible = true
+                ah(badgeFrame, { BackgroundColor3 = toneColor, BackgroundTransparency = isDot and 0 or 0.86 }, 0.2)
+                ah(badgeStroke, { Color = toneColor, Transparency = isDot and 1 or 0.72 }, 0.2)
+                ah(badgeText, { TextColor3 = toneColor }, 0.2)
+                if isDot then
+                    if not badgeRing then
+                        badgeRing = ai("Frame", {
+                            Name = "BadgePulse",
+                            AnchorPoint = Vector2.new(0.5, 0.5),
+                            Position = UDim2.new(1, -18, 0.5, 0),
+                            Size = UDim2.fromOffset(8, 8),
+                            BackgroundColor3 = toneColor,
+                            BackgroundTransparency = 1,
+                            BorderSizePixel = 0,
+                            ZIndex = 2,
+                            Parent = b1,
+                        })
+                        aj(badgeRing, UDim.new(1, 0))
+                    end
+                    badgeRing.Visible = true
+                    ah(badgeRing, { BackgroundColor3 = toneColor }, 0)
+                    pulse()
+                elseif badgeRing then
+                    badgeRing.Visible = false
+                end
+                local reserve = isDot and 16 or math.max(#badgeString * 6 + 12, 18)
+                b0._label.Size = UDim2.new(1, -(labelPad + reserve), 1, 0)
+                if changed then
+                    badgeScale.Scale = 0.55
+                    ah(badgeScale, { Scale = 1 }, 0.4, Enum.EasingStyle.Back)
+                end
             end
             if bZ.Badge ~= nil then
-                b0._setBadge(bZ.Badge)
+                b0._setBadge(bZ.Badge, bZ.BadgeTone or bZ.BadgeColor)
             end
         end
         local b5 = ai(
@@ -25737,7 +25805,7 @@ end
                 }),
                 Parent = headPlate,
             })
-            local headIcon = ai("ImageLabel", {
+            headIcon = ai("ImageLabel", {
                 AnchorPoint = Vector2.new(0.5, 0.5),
                 Position = UDim2.fromScale(0.5, 0.5),
                 Size = UDim2.fromOffset(18, 18),
@@ -25773,163 +25841,205 @@ end
         b0._headerBottom = b7
         b0._iconName = bZ.Icon
         bJ(b0, b5, b7, bZ.Icon or "layout-grid", bZ.EmptyText or "Nothing here yet")
-        local b8 = ai("UIScale", { Parent = b1 })
-        local function b9()
-            ah(b8, { Scale = 1 }, 0.3, Enum.EasingStyle.Quint)
+
+        -- ----- public tab methods -----
+        function b0._refreshVisible()
+            b1.Visible = window._introDone == true and not b0._hidden and not b0._collapsedHidden
+        end
+        function b0:Select()
+            window:SelectTab(b0)
+            return b0
+        end
+        function b0:SetName(text)
+            text = tostring(text == nil and "" or text)
+            b0.Name = text
+            b0._label.Text = text
+            b5.Name = text
+            if not bZ.PageTitle then
+                b0._title.Text = text
+            end
+            return b0
+        end
+        function b0:SetIcon(name)
+            if b0._icon then
+                aq(b0._icon, name)
+                if headIcon then
+                    aq(headIcon, name)
+                end
+                b0._iconName = name
+            end
+            return b0
+        end
+        function b0:IsVisible()
+            return not b0._hidden
+        end
+        function b0:SetVisible(state)
+            local hide = state == false
+            if (b0._hidden == true) == hide then
+                return b0
+            end
+            b0._hidden = hide
+            b0._refreshVisible()
+            if hide and window.CurrentTab == b0 then
+                local alternative = window:_stepTab(b0, 1) or window:_stepTab(b0, -1)
+                if alternative then
+                    window:SelectTab(alternative)
+                end
+            end
+            if b0._section then
+                b0._section._refresh()
+            end
+            window:_followIndicator(0.12)
+            return b0
+        end
+        function b0:IsDisabled()
+            return b0._disabled == true
+        end
+        function b0:SetDisabled(state)
+            state = state == true
+            if (b0._disabled == true) == state then
+                return b0
+            end
+            b0._disabled = state
+            ah(b0._label, { TextTransparency = state and 0.6 or 0 }, 0.2)
+            if b0._icon then
+                local resting = b0._icon:GetAttribute("CustomIcon") and (window.CurrentTab == b0 and 0 or 0.4) or 0
+                ah(b0._icon, { ImageTransparency = state and 0.65 or resting }, 0.2)
+            end
+            ah(b1, { BackgroundTransparency = 1 }, 0.15)
+            ah(b2, { Transparency = 1 }, 0.15)
+            return b0
+        end
+
+        -- ----- interaction -----
+        local press = ai("UIScale", { Parent = b1 })
+        local function release()
+            ah(press, { Scale = 1 }, 0.3, Enum.EasingStyle.Quint)
+        end
+        local function setHover(on)
+            if b0._disabled then
+                return
+            end
+            local active = window.CurrentTab == b0
+            if b0._icon then
+                local iconSize = active and (on and 18 or 17) or (on and 17 or 16)
+                ah(b0._icon, { Size = UDim2.fromOffset(iconSize, iconSize) }, 0.25, Enum.EasingStyle.Back)
+            end
+            if active then
+                return
+            end
+            ah(b1, { BackgroundTransparency = on and 0.78 or 1 }, 0.2, Enum.EasingStyle.Quint)
+            ah(b2, { Transparency = on and 0.8 or 1 }, 0.2)
+            ah(b0._label, { TextColor3 = on and z.Text or z.Muted }, 0.2)
+            if b0._icon then
+                ar(b0._icon, on and z.Text or z.Muted, on, 0.2)
+            end
         end
         b1.MouseEnter:Connect(function()
-            if self.CurrentTab ~= b0 and not ax() then
-                ah(b1, { BackgroundTransparency = 0.75 }, 0.2, Enum.EasingStyle.Quint)
-                ah(b0._label, { TextColor3 = z.Text }, 0.2)
-                if b0._icon then
-                    ar(b0._icon, z.Text, true, 0.2)
-                end
+            if not ax() then
+                setHover(true)
             end
         end)
         b1.MouseLeave:Connect(function()
-            b9()
-            if self.CurrentTab ~= b0 then
-                ah(b1, { BackgroundTransparency = 1 }, 0.3, Enum.EasingStyle.Quint)
-                ah(b0._label, { TextColor3 = z.Muted }, 0.3)
-                if b0._icon then
-                    ar(b0._icon, z.Muted, false, 0.3)
-                end
-            end
+            release()
+            setHover(false)
         end)
         b1.MouseButton1Down:Connect(function()
-            ah(b8, { Scale = 0.97 }, 0.15, Enum.EasingStyle.Quint)
+            if not b0._disabled then
+                ah(press, { Scale = 0.97 }, 0.15, Enum.EasingStyle.Quint)
+            end
         end)
-        b1.MouseButton1Up:Connect(b9)
+        b1.MouseButton1Up:Connect(release)
         local ca = ay(b1, function()
             return self.TabList
         end)
         b1.MouseButton1Click:Connect(function()
-            b9()
-            if ca() then
-                self:SelectTab(b0)
+            release()
+            if b0._disabled or not ca() then
+                return
             end
+            window._tabTouched = true
+            window:SelectTab(b0)
         end)
-        b0._stroke = b2
         self:_fitTitle(b0)
         if not self._introDone then
             b1.Visible = false
         end
+        b0._section = section
+        if section then
+            table.insert(section._tabs, b0)
+            if section._collapsed then
+                b0._collapsedHidden = true
+                b1.ClipsDescendants = true
+                b1.Size = UDim2.new(1, 0, 0, 0)
+                b1.Visible = false
+            end
+            section._render()
+        end
         table.insert(self.Tabs, b0)
+        self:_bindTabKeys()
+        if bZ.Visible == false then
+            b0:SetVisible(false)
+        end
+        if bZ.Disabled == true then
+            b0:SetDisabled(true)
+        end
         if #self.Tabs == 1 then
             task.defer(function()
-                if not self.CurrentTab then
-                    self:SelectTab(b0)
+                if self.CurrentTab or self._destroyed then
+                    return
                 end
+                local first = self:_startTab() or b0
+                self._autoTab = first
+                self:SelectTab(first, true)
             end)
+        elseif
+            self._autoTab
+            and self.CurrentTab == self._autoTab
+            and not self._tabTouched
+            and not b0._hidden
+            and not b0._disabled
+            and self:_tabStateLoad().Tab == b0.Name
+        then
+            -- tab declared after the first one was already shown (the script yielded): it is the one the user left open
+            self._autoTab = b0
+            self:SelectTab(b0, true)
         end
         return b0
     end
     a2.CreateTab = a2.Tab
-    -- TabSection: a header in the sidebar. The tabs created after it belong to it, up to the next TabSection.
-    -- Options: Name/Title, Icon (lucide name or asset), Collapsible (default true), Collapsed (default false),
-    --          Divider (default true: the fading line after the title), Callback(collapsed) / OnToggle(collapsed).
-    -- Clicking the header folds the tabs of the section away. A folded section shows how many tabs it hides, tinted
-    -- with the accent while the open tab is one of them. SelectTab (search results, the default tab) unfolds the
-    -- section of the tab it opens. An empty Name makes a plain spacer with a hairline; it also ends the section before it.
-    -- Methods: SetText(text), SetIcon(icon), SetVisible(bool), Collapse(silent), Expand(silent), Toggle(silent),
-    --          SetCollapsed(bool, silent), IsCollapsed(), GetTabs(), Destroy().   Fields: Name, Collapsed.
     function a2:TabSection(bZ)
         bZ = l(bZ, { Title = "Name" })
-        local window = self
-        local runService = game:GetService("RunService")
+        local owner = self
         local sectionName = tostring(bZ.Name or "")
-        local named = sectionName ~= ""
-        local collapsible = named and bZ.Collapsible ~= false
-        local collapsed = collapsible and bZ.Collapsed == true
-        local callback = bZ.Callback or bZ.OnToggle
-        local order = #self.Tabs * 10
         self._tabSections = self._tabSections or {}
-        self._sectionHandles = self._sectionHandles or {}
-        local handle = { Name = sectionName, Collapsed = collapsed, _tabs = {} }
-        local holder = ai("Frame", {
+        local collapsible = bZ.Collapsible ~= false and sectionName ~= ""
+        local holder = ai("TextButton", {
             Name = "TabSection",
-            Size = UDim2.new(1, 0, 0, named and 32 or 14),
+            Size = UDim2.new(1, 0, 0, 28),
             BackgroundTransparency = 1,
-            LayoutOrder = order + 5,
+            Text = "",
+            AutoButtonColor = false,
+            LayoutOrder = #self.Tabs * 10 + 5,
             Visible = self._introDone == true,
             Parent = self._tabStack,
         })
-        handle._frame = holder
-        table.insert(self._tabSections, holder)
-
-        -- no title: a spacer with a hairline, and the tabs that follow are not part of any section
-        if not named then
-            ai("Frame", {
-                AnchorPoint = Vector2.new(0, 0.5),
-                Position = UDim2.new(0, 10, 0.5, 0),
-                Size = UDim2.new(1, -20, 0, 1),
-                BackgroundColor3 = z.Stroke,
-                BackgroundTransparency = 0.45,
-                BorderSizePixel = 0,
-                Parent = holder,
-            })
-            self._currentSection = nil
-            function handle:SetText(text)
-                handle.Name = tostring(text == nil and "" or text)
-            end
-            function handle:SetIcon() end
-            function handle:SetVisible(visible)
-                holder.Visible = visible and true or false
-            end
-            function handle:Collapse() end
-            function handle:Expand() end
-            function handle:Toggle() end
-            function handle:SetCollapsed() end
-            function handle:IsCollapsed()
-                return false
-            end
-            function handle:GetTabs()
-                return {}
-            end
-            function handle:Destroy()
-                local index = table.find(window._tabSections, holder)
-                if index then
-                    table.remove(window._tabSections, index)
-                end
-                holder:Destroy()
-            end
-            return handle
-        end
-
-        ------------------------------------------------------------------ header
-        local barProps = {
-            Name = "Header",
-            Position = UDim2.fromOffset(0, 6),
-            Size = UDim2.new(1, 0, 0, 24),
-            BackgroundColor3 = z.Surface3,
-            BackgroundTransparency = 1,
-            BorderSizePixel = 0,
-            Parent = holder,
-        }
-        if collapsible then
-            barProps.Text = ""
-            barProps.AutoButtonColor = false
-        end
-        local bar = ai(collapsible and "TextButton" or "Frame", barProps)
-        aj(bar, UDim.new(0, 7))
-
-        local captionX = 10
         local caption = am({
-            Position = UDim2.fromOffset(captionX, 0),
-            Size = UDim2.new(1, -(captionX + 34), 1, 0),
+            Position = UDim2.fromOffset(12, 10),
+            Size = UDim2.new(1, -24, 0, 14),
             Text = string.upper(sectionName),
             TextSize = 10,
             FontFace = D.Bold,
             TextColor3 = z.Muted,
-            Parent = bar,
+            Parent = holder,
         })
         local rule = ai("Frame", {
             AnchorPoint = Vector2.new(0, 0.5),
-            Position = UDim2.new(0, 60, 0.5, 0),
+            Position = UDim2.new(0, 60, 0, 17),
             Size = UDim2.new(1, -72, 0, 1),
             BackgroundColor3 = z.Stroke,
             BorderSizePixel = 0,
-            Parent = bar,
+            Parent = holder,
         })
         ai("UIGradient", {
             Transparency = NumberSequence.new({
@@ -25938,381 +26048,208 @@ end
             }),
             Parent = rule,
         })
-
-        -- right side: how many tabs are folded away, and the chevron
-        local chevron, chevronIsText, pill, pillText
-        local pillW = 18
+        local chevron, chevronText
+        local expandedRotation, collapsedRotation = 0, -90
         if collapsible then
             chevron = ai("ImageLabel", {
                 AnchorPoint = Vector2.new(1, 0.5),
-                Position = UDim2.new(1, -8, 0.5, 0),
-                Size = UDim2.fromOffset(14, 14),
+                Position = UDim2.new(1, -12, 0, 17),
+                Size = UDim2.fromOffset(10, 10),
                 BackgroundTransparency = 1,
                 ImageColor3 = z.Muted,
+                ImageTransparency = 0.45,
                 ScaleType = Enum.ScaleType.Fit,
-                Parent = bar,
+                Parent = holder,
             })
             aq(chevron, "chevron-down")
             if chevron.Image == "" then
-                -- no icon pack: a text arrow does the same job
                 chevron:Destroy()
-                chevronIsText = true
+                chevronText = true
+                expandedRotation, collapsedRotation = 90, 0
                 chevron = am({
                     AnchorPoint = Vector2.new(1, 0.5),
-                    Position = UDim2.new(1, -8, 0.5, 0),
-                    Size = UDim2.fromOffset(14, 14),
+                    Position = UDim2.new(1, -12, 0, 17),
+                    Size = UDim2.fromOffset(10, 14),
                     Text = "\u{203a}",
-                    TextSize = 18,
-                    TextXAlignment = Enum.TextXAlignment.Center,
+                    TextSize = 16,
                     TextColor3 = z.Muted,
-                    Parent = bar,
+                    TextTransparency = 0.45,
+                    TextXAlignment = Enum.TextXAlignment.Center,
+                    TextTruncate = Enum.TextTruncate.None,
+                    Parent = holder,
                 })
             end
-            pill = ai("Frame", {
-                Name = "Count",
-                AnchorPoint = Vector2.new(1, 0.5),
-                Position = UDim2.new(1, -28, 0.5, 0),
-                Size = UDim2.fromOffset(0, 14),
-                AutomaticSize = Enum.AutomaticSize.X,
-                BackgroundColor3 = z.Surface3,
-                BackgroundTransparency = 0.35,
-                BorderSizePixel = 0,
-                Visible = false,
-                Parent = bar,
-            })
-            aj(pill, UDim.new(1, 0))
-            al(pill, 6, 6, 0, 0)
-            pillText = am({
-                Size = UDim2.new(0, 0, 1, 0),
-                AutomaticSize = Enum.AutomaticSize.X,
-                TextSize = 10,
-                FontFace = D.Bold,
-                TextColor3 = z.Muted,
-                TextTruncate = Enum.TextTruncate.None,
-                TextXAlignment = Enum.TextXAlignment.Center,
-                Parent = pill,
-            })
         end
-        local chevronColor = chevronIsText and "TextColor3" or "ImageColor3"
-
-        -- the fading line fills whatever room the title and the right side leave
-        local function fitRule()
-            local reserve = 8
-            if collapsible then
-                reserve = 32 + ((pill.Visible and (pillW + 6)) or 0)
+        local chevronColorKey = chevronText and "TextColor3" or "ImageColor3"
+        local chevronAlphaKey = chevronText and "TextTransparency" or "ImageTransparency"
+        local handle = { _frame = holder, _tabs = {}, _collapsed = false, _gen = 0, Name = sectionName }
+        local saved = self:_tabStateLoad().Collapsed[sectionName]
+        if collapsible then
+            if saved ~= nil then
+                handle._collapsed = saved
+            else
+                handle._collapsed = bZ.Collapsed == true
             end
-            local used = captionX + caption.TextBounds.X + 8
-            rule.Position = UDim2.new(0, used, 0.5, 0)
-            rule.Size = UDim2.new(1, -(used + reserve), 0, 1)
-            rule.Visible = bZ.Divider ~= false and sectionName ~= ""
         end
-        caption:GetPropertyChangedSignal("TextBounds"):Connect(fitRule)
-        local function layoutCaption()
-            caption.Position = UDim2.fromOffset(captionX, 0)
-            caption.Size = UDim2.new(1, -(captionX + (collapsible and 40 or 12)), 1, 0)
+        if chevron then
+            chevron.Rotation = handle._collapsed and collapsedRotation or expandedRotation
+        end
+        local function fitRule()
+            local used = 12 + caption.TextBounds.X + 8
+            rule.Position = UDim2.new(0, used, 0, 17)
+            rule.Size = UDim2.new(1, -(used + (collapsible and 30 or 10)), 0, 1)
+            rule.Visible = sectionName ~= ""
+        end
+        local function render()
+            local text = string.upper(sectionName)
+            if handle._collapsed and #handle._tabs > 0 then
+                text = text .. "  \u{b7}  " .. #handle._tabs
+            end
+            caption.Text = text
             fitRule()
         end
+        handle._render = render
+        caption:GetPropertyChangedSignal("TextBounds"):Connect(fitRule)
+        render()
+        table.insert(self._tabSections, holder)
+        self._currentTabSection = handle
 
-        local icon
-        local function applyIcon(name)
-            if name == nil or name == false or name == "" then
-                if icon then
-                    icon.Visible = false
+        -- fold / unfold every tab that belongs to this section (tabs declared after it, up to the next section)
+        local function applyCollapse(state, animate)
+            handle._collapsed = state
+            handle._gen += 1
+            local gen = handle._gen
+            if chevron then
+                local rotation = state and collapsedRotation or expandedRotation
+                if animate then
+                    ah(chevron, { Rotation = rotation }, 0.3, Enum.EasingStyle.Quint)
+                else
+                    chevron.Rotation = rotation
                 end
-            else
-                if not icon then
-                    icon = ai("ImageLabel", {
-                        AnchorPoint = Vector2.new(0, 0.5),
-                        Position = UDim2.new(0, 10, 0.5, 0),
-                        Size = UDim2.fromOffset(12, 12),
-                        BackgroundTransparency = 1,
-                        ImageColor3 = z.Muted,
-                        ScaleType = Enum.ScaleType.Fit,
-                        Parent = bar,
-                    })
-                end
-                aq(icon, name)
-                icon.Visible = icon.Image ~= ""
             end
-            captionX = (icon and icon.Visible) and 28 or 10
-            layoutCaption()
-        end
-        applyIcon(bZ.Icon)
-
-        ------------------------------------------------------------------ body: the tabs of the section live in here
-        local body = ai("Frame", {
-            Name = "TabSectionBody",
-            Size = UDim2.new(1, 0, 0, 0),
-            AutomaticSize = collapsed and Enum.AutomaticSize.None or Enum.AutomaticSize.Y,
-            BackgroundTransparency = 1,
-            BorderSizePixel = 0,
-            ClipsDescendants = collapsed,
-            LayoutOrder = order + 6,
-            Parent = self._tabStack,
-        })
-        local bodyLayout = ai("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = body })
-        handle._body = body
-        self._currentSection = handle
-        table.insert(self._sectionHandles, handle)
-
-        local function liveTabs()
-            local live = {}
+            render()
+            local foldedSize = UDim2.new(1, 0, 0, 0)
+            local openSize = UDim2.new(1, 0, 0, H)
             for _, tab in ipairs(handle._tabs) do
-                if tab._button and tab._button.Parent then
-                    live[#live + 1] = tab
+                local button = tab._button
+                if button and button.Parent then
+                    button.ClipsDescendants = true
+                    if state then
+                        ah(tab._stroke, { Transparency = 1 }, 0.1)
+                        if animate and button.Visible then
+                            ah(button, { Size = foldedSize }, 0.26, Enum.EasingStyle.Quint)
+                        else
+                            button.Size = foldedSize
+                        end
+                    else
+                        tab._collapsedHidden = false
+                        if animate then
+                            button.Visible = owner._introDone == true and not tab._hidden
+                            ah(button, { Size = openSize }, 0.3, Enum.EasingStyle.Quint)
+                        else
+                            button.Size = openSize
+                        end
+                    end
                 end
             end
-            return live
+            local function settle()
+                if handle._gen ~= gen or owner._destroyed then
+                    return
+                end
+                for _, tab in ipairs(handle._tabs) do
+                    local button = tab._button
+                    if button and button.Parent then
+                        if state then
+                            tab._collapsedHidden = true
+                            button.Visible = false
+                        else
+                            button.ClipsDescendants = false
+                            tab._refreshVisible()
+                        end
+                    end
+                end
+                owner:_followIndicator(0.05)
+            end
+            if animate then
+                task.delay(state and 0.28 or 0.32, settle)
+                owner:_followIndicator(state and 0.3 or 0.34)
+            else
+                settle()
+            end
         end
-        local function refresh()
-            if not collapsible then
+        function handle:IsCollapsed()
+            return handle._collapsed == true
+        end
+        function handle:Collapse()
+            if collapsible and not handle._collapsed then
+                applyCollapse(true, owner._introDone == true)
+                owner:_noteSection(sectionName, true)
+            end
+        end
+        function handle:Expand()
+            if collapsible and handle._collapsed then
+                applyCollapse(false, owner._introDone == true)
+                owner:_noteSection(sectionName, false)
+            end
+        end
+        function handle:Toggle()
+            if handle._collapsed then
+                handle:Expand()
+            else
+                handle:Collapse()
+            end
+        end
+        function handle._refresh()
+            if handle._userVisible == false then
                 return
             end
-            local live = liveTabs()
-            local hasCurrent = false
-            for _, tab in ipairs(live) do
-                if window.CurrentTab == tab then
-                    hasCurrent = true
+            local any = #handle._tabs == 0
+            for _, tab in ipairs(handle._tabs) do
+                if not tab._hidden then
+                    any = true
                     break
                 end
             end
-            local text = tostring(#live)
-            pillText.Text = text
-            pillW = math.max(#text * 6 + 12, 18)
-            pill.Visible = collapsed and #live > 0
-            ah(pill, { BackgroundColor3 = hasCurrent and z.Accent or z.Surface3, BackgroundTransparency = hasCurrent and 0.86 or 0.35 }, 0.2)
-            ah(pillText, { TextColor3 = hasCurrent and z.Accent or z.Muted }, 0.2)
-            fitRule()
+            holder.Visible = owner._introDone == true and any
         end
-        handle._refresh = refresh
-
-        local function paintChevron(animated)
-            if not chevron then
+        holder.MouseEnter:Connect(function()
+            if not collapsible or ax() then
                 return
             end
-            local rotation
-            if chevronIsText then
-                rotation = collapsed and 0 or 90
-            else
-                rotation = collapsed and -90 or 0
-            end
-            ah(chevron, { Rotation = rotation }, animated and 0.25 or 0, Enum.EasingStyle.Quint)
-        end
-        paintChevron(false)
-        refresh()
-
-        ------------------------------------------------------------------ fold / unfold
-        -- the highlight of the open tab is a separate frame, so it has to follow its tab while the list moves
-        local function followIndicator(duration)
-            local indicator = window.Indicator
-            if not indicator then
-                return
-            end
-            local started = os.clock()
-            local connection
-            connection = runService.Heartbeat:Connect(function()
-                local tab = window.CurrentTab
-                if window._destroyed or not tab or not tab._button.Parent or not indicator.Visible or os.clock() - started > duration + 0.1 then
-                    connection:Disconnect()
-                    return
-                end
-                if window._indicatorTween then
-                    pcall(function()
-                        window._indicatorTween:Cancel()
-                    end)
-                    window._indicatorTween = nil
-                end
-                indicator.Position = UDim2.fromOffset(8, window:_indicatorY(tab))
-            end)
-        end
-
-        local bodyTween
-        local animId = 0
-        local function setCollapsed(state, silent, instant)
+            ah(caption, { TextColor3 = z.Text }, 0.15)
+            ah(chevron, { [chevronColorKey] = z.Text, [chevronAlphaKey] = 0 }, 0.15)
+        end)
+        holder.MouseLeave:Connect(function()
             if not collapsible then
                 return
             end
-            state = state == true
-            if state == collapsed then
-                return
+            ah(caption, { TextColor3 = z.Muted }, 0.2)
+            ah(chevron, { [chevronColorKey] = z.Muted, [chevronAlphaKey] = 0.45 }, 0.2)
+        end)
+        holder.MouseButton1Click:Connect(function()
+            if collapsible then
+                handle:Toggle()
             end
-            collapsed = state
-            handle.Collapsed = state
-            animId += 1
-            local id = animId
-            if bodyTween then
-                bodyTween:Cancel()
-                bodyTween = nil
-            end
-            local scale = math.max(window.Scale.Scale, 0.05)
-            local immediate = instant == true or window.Open == false or not holder.Visible
-            local indicator = window.Indicator
-            local inside = window.CurrentTab ~= nil and window.CurrentTab._section == handle
-            paintChevron(not immediate)
-            refresh()
-            if state then
-                local from = body.AbsoluteSize.Y / scale
-                body.AutomaticSize = Enum.AutomaticSize.None
-                body.ClipsDescendants = true
-                if inside and indicator then
-                    -- the open tab is going out of sight, so its highlight goes too
-                    ah(indicator, { BackgroundTransparency = 1 }, immediate and 0 or 0.15)
-                    if window._indicatorStroke then
-                        ah(window._indicatorStroke, { Transparency = 1 }, immediate and 0 or 0.15)
-                    end
-                    task.delay(immediate and 0 or 0.16, function()
-                        if id == animId and collapsed then
-                            indicator.Visible = false
-                        end
-                    end)
-                end
-                if immediate or from <= 0 then
-                    body.Size = UDim2.new(1, 0, 0, 0)
-                else
-                    body.Size = UDim2.new(1, 0, 0, from)
-                    bodyTween = ah(body, { Size = UDim2.new(1, 0, 0, 0) }, 0.3, Enum.EasingStyle.Quint)
-                    followIndicator(0.3)
-                end
-            else
-                body.AutomaticSize = Enum.AutomaticSize.None
-                body.ClipsDescendants = true
-                local target = bodyLayout.AbsoluteContentSize.Y / scale
-                local function finish()
-                    if id ~= animId or collapsed then
-                        return
-                    end
-                    body.AutomaticSize = Enum.AutomaticSize.Y
-                    body.Size = UDim2.new(1, 0, 0, 0)
-                    body.ClipsDescendants = false
-                    local tab = window.CurrentTab
-                    if tab and tab._section == handle then
-                        window:_scrollTabIntoView(tab)
-                    end
-                end
-                if immediate or target <= 0 then
-                    finish()
-                else
-                    body.Size = UDim2.new(1, 0, 0, body.AbsoluteSize.Y / scale)
-                    bodyTween = ah(body, { Size = UDim2.new(1, 0, 0, target) }, 0.3, Enum.EasingStyle.Quint)
-                    task.delay(0.32, finish)
-                end
-                if inside then
-                    -- the open tab is back: bring its highlight back, then keep it glued to the tab while the list opens
-                    task.delay(immediate and 0.06 or 0.03, function()
-                        local tab = window.CurrentTab
-                        if id == animId and not collapsed and tab and tab._section == handle then
-                            window:_placeIndicator(tab)
-                            followIndicator(immediate and 0.1 or 0.3)
-                        end
-                    end)
-                elseif not immediate then
-                    followIndicator(0.3)
-                end
-            end
-            if not silent and type(callback) == "function" then
-                task.spawn(callback, state)
-            end
-        end
-
-        function handle:SetCollapsed(state, silent)
-            setCollapsed(state, silent)
-        end
-        function handle:Collapse(silent)
-            setCollapsed(true, silent)
-        end
-        function handle:Expand(silent)
-            setCollapsed(false, silent)
-        end
-        function handle:Toggle(silent)
-            setCollapsed(not collapsed, silent)
-        end
-        function handle:IsCollapsed()
-            return collapsed
-        end
-        function handle:GetTabs()
-            return liveTabs()
-        end
-
-        ------------------------------------------------------------------ hover / click
-        if collapsible then
-            local function paintHover(on)
-                ah(bar, { BackgroundTransparency = on and 0.8 or 1 }, 0.15)
-                ah(caption, { TextColor3 = on and z.Text or z.Muted }, 0.15)
-                ah(chevron, { [chevronColor] = on and z.Text or z.Muted }, 0.15)
-                if icon and icon.Visible then
-                    ar(icon, on and z.Text or z.Muted, on, 0.15)
-                end
-            end
-            bar.MouseEnter:Connect(function()
-                if not ax() then
-                    paintHover(true)
-                end
-            end)
-            bar.MouseLeave:Connect(function()
-                paintHover(false)
-            end)
-            bar.MouseButton1Down:Connect(function()
-                ah(bar, { BackgroundTransparency = 0.65 }, 0.1)
-            end)
-            bar.MouseButton1Up:Connect(function()
-                ah(bar, { BackgroundTransparency = ax() and 1 or 0.8 }, 0.15)
-            end)
-            -- a drag that scrolls the sidebar on touch must not count as a click
-            local clickable = ay(bar, function()
-                return window.TabList
-            end)
-            bar.MouseButton1Click:Connect(function()
-                if clickable() then
-                    setCollapsed(not collapsed)
-                end
-            end)
-        end
-
-        ------------------------------------------------------------------ the rest of the handle
+        end)
         function handle:SetText(text)
-            sectionName = tostring(text == nil and "" or text)
-            handle.Name = sectionName
-            caption.Text = string.upper(sectionName)
-            fitRule()
-        end
-        function handle:SetIcon(name)
-            applyIcon(name)
+            sectionName = tostring(text or "")
+            render()
         end
         function handle:SetVisible(visible)
-            visible = visible ~= false
-            holder.Visible = visible
-            body.Visible = visible
+            handle._userVisible = visible and true or false
+            holder.Visible = visible and true or false
         end
-        -- the tabs stay where they are in the list, they just stop belonging to a section
         function handle:Destroy()
-            for _, tab in ipairs(handle._tabs) do
-                if tab._button and tab._button.Parent then
-                    tab._button.Parent = window._tabStack
-                end
-                tab._section = nil
-            end
-            handle._tabs = {}
-            if window._currentSection == handle then
-                window._currentSection = nil
-            end
-            local index = table.find(window._tabSections, holder)
+            local index = table.find(owner._tabSections, holder)
             if index then
-                table.remove(window._tabSections, index)
+                table.remove(owner._tabSections, index)
             end
-            index = table.find(window._sectionHandles, handle)
-            if index then
-                table.remove(window._sectionHandles, index)
+            if owner._currentTabSection == handle then
+                owner._currentTabSection = nil
             end
             holder:Destroy()
-            body:Destroy()
         end
         return handle
-    end
-    -- called when the open tab changes, so a folded section can tint its counter when the open tab is inside it
-    function a2:_refreshSections()
-        for _, section in ipairs(self._sectionHandles or {}) do
-            section._refresh()
-        end
     end
     a2.CreateTabSection = a2.TabSection
     a2.AddTabSection = a2.TabSection
@@ -28524,9 +28461,8 @@ end
     a2.CreateCloudConfigs = a2.CloudConfigs
     a2.CloudConfig = a2.CloudConfigs
     a2.CreateCloudConfig = a2.CloudConfigs
-    function aS:SetBadge() end
     function aS:GetBadge()
-        return nil
+        return self.Badge
     end
     function a2:Dialog(opts)
         opts = l(opts, { Name = "Title", Text = "Content", Message = "Content", Description = "Content", Image = "Icon" })
@@ -29226,11 +29162,54 @@ end
         local b_ = self._tabStack
         return (bZ._button.AbsolutePosition.Y - b_.AbsolutePosition.Y) / self.Scale.Scale + b_.Position.Y.Offset
     end
+    -- keeps the sidebar indicator glued to the active tab while the layout moves (section fold / unfold, tab hidden)
+    function a2:_followIndicator(duration)
+        if not self._introDone or self._destroyed then
+            return
+        end
+        self._followToken = (self._followToken or 0) + 1
+        local token = self._followToken
+        local started = os.clock()
+        local indicator = self.Indicator
+        local connection
+        local function step(final)
+            local tab = self.CurrentTab
+            if not tab or not tab._button or not tab._button.Parent then
+                return
+            end
+            if tab._hidden or tab._collapsedHidden then
+                if final then
+                    indicator.Visible = false
+                end
+                return
+            end
+            local button = tab._button
+            local scale = math.max(self.Scale.Scale, 0.05)
+            local height = final and H or math.clamp(button.AbsoluteSize.Y / scale, 0, H)
+            indicator.Visible = button.Visible and height > 0.5
+            indicator.Size = UDim2.new(1, -16, 0, height)
+            indicator.Position = UDim2.fromOffset(8, self:_indicatorY(tab))
+        end
+        connection = d.Heartbeat:Connect(function()
+            if token ~= self._followToken or self._destroyed then
+                connection:Disconnect()
+                return
+            end
+            if os.clock() - started >= duration then
+                connection:Disconnect()
+                step(true)
+                return
+            end
+            step(false)
+        end)
+    end
     function a2:_placeIndicator(bZ)
         local b_ = self.Indicator
         local b0 = self:_indicatorY(bZ)
+        self._followToken = (self._followToken or 0) + 1
         if not b_.Visible then
             b_.Visible = true
+            b_.Size = UDim2.new(1, -16, 0, H)
             b_.Position = UDim2.fromOffset(8, b0)
             b_.BackgroundTransparency = 1
             ah(b_, { BackgroundTransparency = 0.35 }, 0.3)
@@ -29238,13 +29217,35 @@ end
                 self._indicatorStroke.Transparency = 1
                 ah(self._indicatorStroke, { Transparency = 0.84 }, 0.3)
             end
+            if self._indicatorTint then
+                self._indicatorTint.BackgroundTransparency = 1
+                ah(self._indicatorTint, { BackgroundTransparency = 0.8 }, 0.3)
+            end
+            if self._indicatorGlow then
+                self._indicatorGlow.ImageTransparency = 1
+                ah(self._indicatorGlow, { ImageTransparency = 0.7 }, 0.3)
+            end
         end
         local pill = self._indicatorPill
         if pill then
             pill.Size = UDim2.fromOffset(3, 7)
             ah(pill, { Size = UDim2.fromOffset(3, 16) }, 0.5, Enum.EasingStyle.Back)
         end
-        self._indicatorTween = ah(b_, { Position = UDim2.fromOffset(8, b0) }, 0.45, Enum.EasingStyle.Quint)
+        local travel = math.abs(b0 - b_.Position.Y.Offset)
+        ah(b_, { Position = UDim2.fromOffset(8, b0) }, 0.45, Enum.EasingStyle.Quint)
+        -- liquid stretch: the highlight elongates while it travels, then settles back to its normal height
+        self._stretchGen = (self._stretchGen or 0) + 1
+        local stretchGen = self._stretchGen
+        if travel > 2 then
+            ah(b_, { Size = UDim2.new(1, -16, 0, H + math.min(travel * 0.22, 16)) }, 0.14, Enum.EasingStyle.Quad)
+            task.delay(0.14, function()
+                if self._stretchGen == stretchGen and not self._destroyed then
+                    ah(b_, { Size = UDim2.new(1, -16, 0, H) }, 0.34, Enum.EasingStyle.Quint)
+                end
+            end)
+        else
+            b_.Size = UDim2.new(1, -16, 0, H)
+        end
     end
     function a2:_overflowHint(bZ, b_, b0, b1, b2)
         local b3 = ai(
@@ -29535,46 +29536,69 @@ end
             end
         end)
     end
-    function a2:SelectTab(bZ)
+    function a2:_paintTab(tab, active)
+        if not tab or not tab._label then
+            return
+        end
+        tab._label.FontFace = active and D.Bold or D.Medium
+        ah(tab._label, { TextColor3 = active and z.Text or z.Muted }, 0.3)
+        if tab._icon then
+            ar(tab._icon, active and z.Accent or z.Muted, active, 0.3)
+            ah(tab._icon, { Size = active and UDim2.fromOffset(17, 17) or UDim2.fromOffset(16, 16) }, 0.35, Enum.EasingStyle.Back)
+        end
+        if tab._aura then
+            ah(tab._aura, { ImageTransparency = active and 0.8 or 1 }, 0.35)
+        end
+        if active then
+            ah(tab._button, { BackgroundTransparency = 1 }, 0.2)
+            ah(tab._stroke, { Transparency = 1 }, 0.2)
+        end
+    end
+    function a2:SelectTab(bZ, silent)
+        if type(bZ) ~= "table" then
+            bZ = self:GetTab(bZ)
+        end
+        if type(bZ) ~= "table" or bZ._hidden or bZ._disabled then
+            return
+        end
+        local expanded = false
+        if bZ._section and bZ._section._collapsed then
+            bZ._section:Expand()
+            expanded = true
+        end
         if self.CurrentTab == bZ then
             return
         end
-        local section = bZ._section
-        if section and section:IsCollapsed() then
-            section:Expand()
+        if self._autoTab ~= bZ then
+            self._autoTab = nil
         end
         local b_ = self.CurrentTab
         self:_resetSearch()
         self:_closePopups()
         self.CurrentTab = bZ
-        self:_refreshSections()
         self:_settleTransition()
         local b0 = (self._transitionGeneration or 0) + 1
         self._transitionGeneration = b0
+        -- pages slide in the direction of travel (down the list = up from below)
+        local oldIndex = b_ and table.find(self.Tabs, b_)
+        local newIndex = table.find(self.Tabs, bZ)
+        local direction = (oldIndex and newIndex and newIndex < oldIndex) and -1 or 1
         if b_ then
-            ah(b_._label, { TextColor3 = z.Muted }, 0.3)
-            if b_._icon then
-                ar(b_._icon, z.Muted, false, 0.3)
-            end
+            self:_paintTab(b_, false)
             local b1 = self._outLayer
             b_._page.Parent = b1
             self._outPage = b_._page
             b1.GroupTransparency = 0
             b1.Position = UDim2.fromOffset(0, 0)
             b1.Visible = true
-            ah(b1, { GroupTransparency = 1, Position = UDim2.fromOffset(0, -6) }, 0.2, Enum.EasingStyle.Quint)
+            ah(b1, { GroupTransparency = 1, Position = UDim2.fromOffset(0, -6 * direction) }, 0.2, Enum.EasingStyle.Quint)
             task.delay(0.18, function()
                 if self._transitionGeneration == b0 then
                     self:_settleOut()
                 end
             end)
         end
-        ah(bZ._button, { BackgroundTransparency = 1 }, 0.2)
-        ah(bZ._stroke, { Transparency = 1 }, 0.2)
-        ah(bZ._label, { TextColor3 = z.Text }, 0.3)
-        if bZ._icon then
-            ar(bZ._icon, z.Accent, true, 0.3)
-        end
+        self:_paintTab(bZ, true)
         self:_placeIndicator(bZ)
         self:_scrollTabIntoView(bZ)
         local b1 = bZ._page
@@ -29582,12 +29606,31 @@ end
         b1.Visible = true
         b1.Parent = self._inLayer
         self._inPage = b1
-        bz(self._inLayer)
+        local inLayer = self._inLayer
+        inLayer.GroupTransparency = 1
+        inLayer.Position = UDim2.fromOffset(0, 14 * direction)
+        inLayer.Visible = true
+        ah(inLayer, { GroupTransparency = 0, Position = UDim2.fromOffset(0, 0) }, 0.32, Enum.EasingStyle.Quint)
         task.delay(0.32, function()
             if self._transitionGeneration == b0 then
                 self:_settleIn()
             end
         end)
+        if expanded then
+            -- the section was folded: keep the highlight on the tab while it unfolds, then scroll it into view
+            self:_followIndicator(0.36)
+            task.delay(0.36, function()
+                if self.CurrentTab == bZ and not self._destroyed then
+                    self:_scrollTabIntoView(bZ)
+                end
+            end)
+        end
+        if not silent then
+            self:_noteTab(bZ)
+        end
+        for _, listener in ipairs(table.clone(self._tabListeners or {})) do
+            task.spawn(listener, bZ, b_)
+        end
     end
     function a2:_settleOut()
         local bZ = self._outPage
